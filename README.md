@@ -5,9 +5,24 @@ storefront - it only declares five independently-optional services
 (`store_service.h`) and exposes the neutral `host.store_*` Luau surface
 (`store_scripting.cpp`) that forwards to whichever backend module is active.
 A storefront integration is a separate backend module - `modules/store_steam`
-is the first, fully built and verified one; see "Adding a new backend" below
-for the recipe the rest (EGS, GOG Galaxy, Stove, Microsoft Store, ...)
-follow.
+and `modules/store_egs` are built and verified so far; see "Adding a new
+backend" below for the recipe the rest (GOG Galaxy, Stove, Microsoft Store,
+...) follow.
+
+The two show the same neutral interface accommodating structurally different
+SDKs: Steam's calls are mostly synchronous (a local client cache), while
+every single EOS call is asynchronous (a plain C completion callback
+resolved by `EOS_Platform_Tick`, even for a "simple" read) - `store_egs`
+handles this with small per-service caches populated by each query's
+callback, with the neutral interface's synchronous methods reading whatever
+is cached so far. EOS also splits its own API in two by auth method: a
+silent, headless device-id login unlocks achievements/stats/cloud saves/
+leaderboards, but entitlements/IAP/presence/friends need a real Epic account
+session that has no headless equivalent - `store_egs` attempts the closest
+thing (silently reusing a previously cached Epic login, if any) and
+degrades those four to empty/`false` when it's unavailable, the same
+absent-service shape Stove's missing cloud-saves/presence already
+established.
 
 This module never names a concrete store, the same discipline the scripting
 backends already keep for language neutrality - `grep`ping this module for a
