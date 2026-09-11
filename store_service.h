@@ -28,6 +28,10 @@ public:
   /// DLC specifically.
   [[nodiscard]] virtual bool is_owned(nx::string_view dlc_id = {}) const = 0;
 
+  /// DLC ids the signed-in user actually owns - not every DLC the app has
+  /// (a backend's DLC catalogue can include unowned, purchasable entries).
+  [[nodiscard]] virtual nx::vector<nx::string> owned_dlc_ids() const = 0;
+
   [[nodiscard]] virtual nx::string_view store_name() const noexcept = 0;
 };
 
@@ -59,6 +63,14 @@ public:
 
   virtual bool unlock(nx::string_view id) = 0;
   [[nodiscard]] virtual bool is_unlocked(nx::string_view id) const = 0;
+  [[nodiscard]] virtual nx::vector<nx::string> achievement_ids() const = 0;
+
+  /// Numeric stats, not achievement flags - e.g. "enemies_killed". A backend
+  /// maps this onto whatever numeric-stat storage its SDK has (Steam's own
+  /// stats are declared int or float on its backend; callers here never need
+  /// to know which - an implementation tries both).
+  virtual bool set_stat(nx::string_view id, f64 value) = 0;
+  [[nodiscard]] virtual f64 stat(nx::string_view id) const = 0;
 };
 
 /// Small key/value cloud saves - not a file API. A backend maps this onto
@@ -70,6 +82,11 @@ public:
 
   virtual bool write(nx::string_view key, nx::string_view value) = 0;
   [[nodiscard]] virtual nx::string read(nx::string_view key) const = 0;
+  [[nodiscard]] virtual bool exists(nx::string_view key) const = 0;
+  virtual bool remove(nx::string_view key) = 0;
+  [[nodiscard]] virtual nx::vector<nx::string> keys() const = 0;
+  [[nodiscard]] virtual u64 bytes_used() const = 0;
+  [[nodiscard]] virtual u64 bytes_total() const = 0;
 };
 
 /// Rich presence + friends.
@@ -78,7 +95,9 @@ public:
   virtual ~StorePresence() = default;
 
   virtual bool set_status(nx::string_view text) = 0;
+  [[nodiscard]] virtual nx::string_view own_name() const = 0;
   [[nodiscard]] virtual usize friend_count() const = 0;
+  [[nodiscard]] virtual nx::vector<nx::string> friend_names() const = 0;
 };
 
 }

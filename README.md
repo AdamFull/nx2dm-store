@@ -23,11 +23,11 @@ own services.
 
 | id | interface | required? |
 |---|---|---|
-| `store.core` | `StoreCore` - ownership/entitlement checks | every backend provides this |
+| `store.core` | `StoreCore` - ownership/entitlement checks, owned DLC listing | every backend provides this |
 | `store.iap` | `StoreIap` - product listing + purchase flow | optional |
-| `store.achievements` | `StoreAchievements` | optional |
-| `store.cloud_saves` | `StoreCloudSaves` - small key/value saves | optional |
-| `store.presence` | `StorePresence` - rich presence + friends | optional |
+| `store.achievements` | `StoreAchievements` - achievements + numeric stats | optional |
+| `store.cloud_saves` | `StoreCloudSaves` - key/value saves, listing, quota | optional |
+| `store.presence` | `StorePresence` - rich presence + a real friends list | optional |
 
 "Optional" means exactly what `ServiceProvider::find<T>` already does for any
 absent service: it returns `nullptr`. A backend whose SDK has no cloud-save
@@ -35,6 +35,16 @@ or presence subsystem (Stove, for one - its SDK genuinely has neither) simply
 never registers `StoreCloudSaves`/`StorePresence`, and every neutral Luau
 function above degrades to a safe `false`/empty return. There is no separate
 capability-flag API to check first.
+
+A backend can also expose capabilities that don't belong in this neutral
+interface at all - Steam's Workshop, leaderboards, and explicit overlay
+control (`modules/store_steam/store_steam_workshop.h`,
+`store_steam_leaderboards.h`, `store_steam_overlay.h`) are the worked
+example. These aren't registered through `ServiceRegistry` (nothing outside
+that one backend module will ever look them up) and get their own
+`host.store_steam_*` Luau surface from a separate scripting file
+(`store_steam_scripting.h/.cpp`), keeping `store/store_scripting.cpp` itself
+strictly neutral.
 
 `order_modules()` already rejects two modules that both declare the same
 `provided_services` entry, so if a build somehow enabled two store backends

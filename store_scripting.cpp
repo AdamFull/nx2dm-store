@@ -27,6 +27,14 @@ struct CloudSaveCache {
   nx::string last_read;
 };
 
+/// The same index-into-a-cached-list shape as ProductCache, reused for every
+/// other list-returning neutral method (owned DLC ids, achievement ids,
+/// cloud save keys, friend names) - each gets its own instance below, only
+/// ever populated by its own refresh function.
+struct StringListCache {
+  nx::vector<nx::string> items;
+};
+
 }
 
 void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
@@ -39,6 +47,27 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
     StoreCore *const core = ctx.services().find<StoreCore>(kCoreService);
     return core != nullptr && core->is_owned(dlc_id);
   });
+
+  const auto owned_dlc = std::make_shared<StringListCache>();
+
+  host.expose_as("store_refresh_owned_dlc", [&ctx, owned_dlc]() {
+    StoreCore *const core = ctx.services().find<StoreCore>(kCoreService);
+    if (core == nullptr)
+      return false;
+    owned_dlc->items = core->owned_dlc_ids();
+    return true;
+  });
+
+  host.expose_as("store_owned_dlc_count", [owned_dlc]() {
+    return static_cast<f64>(owned_dlc->items.size());
+  });
+
+  host.expose_as("store_owned_dlc_id",
+                 [owned_dlc](const f64 index) -> nx::string_view {
+                   const usize i = nx::cast<usize>(index);
+                   return i < owned_dlc->items.size() ? owned_dlc->items[i].view()
+                                                       : nx::string_view{};
+                 });
 
   // -- Achievements -------------------------------------------------------
 
@@ -56,6 +85,44 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
                    return achievements != nullptr &&
                           achievements->is_unlocked(id);
                  });
+
+  const auto achievement_ids = std::make_shared<StringListCache>();
+
+  host.expose_as("store_refresh_achievement_ids", [&ctx, achievement_ids]() {
+    StoreAchievements *const achievements =
+        ctx.services().find<StoreAchievements>(kAchievementsService);
+    if (achievements == nullptr)
+      return false;
+    achievement_ids->items = achievements->achievement_ids();
+    return true;
+  });
+
+  host.expose_as("store_achievement_count", [achievement_ids]() {
+    return static_cast<f64>(achievement_ids->items.size());
+  });
+
+  host.expose_as("store_achievement_id",
+                 [achievement_ids](const f64 index) -> nx::string_view {
+                   const usize i = nx::cast<usize>(index);
+                   return i < achievement_ids->items.size()
+                              ? achievement_ids->items[i].view()
+                              : nx::string_view{};
+                 });
+
+  host.expose_as("store_set_stat",
+                 [&ctx](const nx::string_view id, const f64 value) {
+                   StoreAchievements *const achievements =
+                       ctx.services().find<StoreAchievements>(
+                           kAchievementsService);
+                   return achievements != nullptr &&
+                          achievements->set_stat(id, value);
+                 });
+
+  host.expose_as("store_stat", [&ctx](const nx::string_view id) {
+    const StoreAchievements *const achievements =
+        ctx.services().find<StoreAchievements>(kAchievementsService);
+    return achievements == nullptr ? 0.0 : achievements->stat(id);
+  });
 
   // -- IAP ------------------------------------------------------------
 
@@ -133,6 +200,53 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
         return cloud_saves->last_read.view();
       });
 
+  host.expose_as("store_cloud_save_exists", [&ctx](const nx::string_view key) {
+    const StoreCloudSaves *const saves =
+        ctx.services().find<StoreCloudSaves>(kCloudSavesService);
+    return saves != nullptr && saves->exists(key);
+  });
+
+  host.expose_as("store_cloud_save_remove", [&ctx](const nx::string_view key) {
+    StoreCloudSaves *const saves =
+        ctx.services().find<StoreCloudSaves>(kCloudSavesService);
+    return saves != nullptr && saves->remove(key);
+  });
+
+  const auto cloud_save_keys = std::make_shared<StringListCache>();
+
+  host.expose_as("store_refresh_cloud_save_keys", [&ctx, cloud_save_keys]() {
+    StoreCloudSaves *const saves =
+        ctx.services().find<StoreCloudSaves>(kCloudSavesService);
+    if (saves == nullptr)
+      return false;
+    cloud_save_keys->items = saves->keys();
+    return true;
+  });
+
+  host.expose_as("store_cloud_save_key_count", [cloud_save_keys]() {
+    return static_cast<f64>(cloud_save_keys->items.size());
+  });
+
+  host.expose_as("store_cloud_save_key",
+                 [cloud_save_keys](const f64 index) -> nx::string_view {
+                   const usize i = nx::cast<usize>(index);
+                   return i < cloud_save_keys->items.size()
+                              ? cloud_save_keys->items[i].view()
+                              : nx::string_view{};
+                 });
+
+  host.expose_as("store_cloud_bytes_used", [&ctx]() {
+    const StoreCloudSaves *const saves =
+        ctx.services().find<StoreCloudSaves>(kCloudSavesService);
+    return saves == nullptr ? 0.0 : static_cast<f64>(saves->bytes_used());
+  });
+
+  host.expose_as("store_cloud_bytes_total", [&ctx]() {
+    const StoreCloudSaves *const saves =
+        ctx.services().find<StoreCloudSaves>(kCloudSavesService);
+    return saves == nullptr ? 0.0 : static_cast<f64>(saves->bytes_total());
+  });
+
   // -- Presence ---------------------------------------------------------
 
   host.expose_as("store_set_presence", [&ctx](const nx::string_view text) {
@@ -146,6 +260,31 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
         ctx.services().find<StorePresence>(kPresenceService);
     return presence == nullptr ? 0.0 : static_cast<f64>(presence->friend_count());
   });
+
+  host.expose_as("store_own_name", [&ctx]() -> nx::string_view {
+    const StorePresence *const presence =
+        ctx.services().find<StorePresence>(kPresenceService);
+    return presence == nullptr ? nx::string_view{} : presence->own_name();
+  });
+
+  const auto friend_names = std::make_shared<StringListCache>();
+
+  host.expose_as("store_refresh_friend_names", [&ctx, friend_names]() {
+    StorePresence *const presence =
+        ctx.services().find<StorePresence>(kPresenceService);
+    if (presence == nullptr)
+      return false;
+    friend_names->items = presence->friend_names();
+    return true;
+  });
+
+  host.expose_as("store_friend_name",
+                 [friend_names](const f64 index) -> nx::string_view {
+                   const usize i = nx::cast<usize>(index);
+                   return i < friend_names->items.size()
+                              ? friend_names->items[i].view()
+                              : nx::string_view{};
+                 });
 }
 
 }
