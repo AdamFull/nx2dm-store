@@ -1,0 +1,11 @@
+{
+  "name": "store",
+  "displayName": "Store",
+  "version": "0.1.0",
+  "author": "AdamFull",
+  "description": "Neutral storefront interface: entitlements, IAP, achievements, cloud saves, presence.",
+  "license": null,
+  "created": "2026-09-11",
+  "repository": null,
+  "revision": null
+}
