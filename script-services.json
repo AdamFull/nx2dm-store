@@ -1,0 +1,156 @@
+{
+  "services": [
+    {
+      "name": "store_name",
+      "signature": "()->(string)"
+    },
+    {
+      "name": "store_is_owned",
+      "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_refresh_owned_dlc",
+      "signature": "()->(boolean)"
+    },
+    {
+      "name": "store_refresh_dlc_ownership",
+      "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_owned_dlc_count",
+      "signature": "()->(number)"
+    },
+    {
+      "name": "store_owned_dlc_id",
+      "signature": "(number)->(string)"
+    },
+    {
+      "name": "store_unlock_achievement",
+      "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_is_achievement_unlocked",
+      "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_refresh_achievement_ids",
+      "signature": "()->(boolean)"
+    },
+    {
+      "name": "store_refresh_stat",
+      "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_achievement_count",
+      "signature": "()->(number)"
+    },
+    {
+      "name": "store_achievement_id",
+      "signature": "(number)->(string)"
+    },
+    {
+      "name": "store_set_stat",
+      "signature": "(string,number)->(boolean)"
+    },
+    {
+      "name": "store_stat",
+      "signature": "(string)->(number)"
+    },
+    {
+      "name": "store_set_product_id",
+      "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_clear_product_ids",
+      "signature": "()->(boolean)"
+    },
+    {
+      "name": "store_refresh_products",
+      "signature": "()->(boolean)"
+    },
+    {
+      "name": "store_product_count",
+      "signature": "()->(number)"
+    },
+    {
+      "name": "store_product_id",
+      "signature": "(number)->(string)"
+    },
+    {
+      "name": "store_product_title",
+      "signature": "(number)->(string)"
+    },
+    {
+      "name": "store_product_price",
+      "signature": "(number)->(string)"
+    },
+    {
+      "name": "store_purchase",
+      "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_purchase_pending",
+      "signature": "()->(boolean)"
+    },
+    {
+      "name": "store_purchase_error",
+      "signature": "()->(string)"
+    },
+    {
+      "name": "store_cloud_save_write",
+      "signature": "(string,string)->(boolean)"
+    },
+    {
+      "name": "store_cloud_save_read",
+      "signature": "(string)->(string)"
+    },
+    {
+      "name": "store_cloud_save_exists",
+      "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_cloud_save_remove",
+      "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_refresh_cloud_save_keys",
+      "signature": "()->(boolean)"
+    },
+    {
+      "name": "store_cloud_save_key_count",
+      "signature": "()->(number)"
+    },
+    {
+      "name": "store_cloud_save_key",
+      "signature": "(number)->(string)"
+    },
+    {
+      "name": "store_cloud_bytes_used",
+      "signature": "()->(number)"
+    },
+    {
+      "name": "store_cloud_bytes_total",
+      "signature": "()->(number)"
+    },
+    {
+      "name": "store_set_presence",
+      "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_friend_count",
+      "signature": "()->(number)"
+    },
+    {
+      "name": "store_own_name",
+      "signature": "()->(string)"
+    },
+    {
+      "name": "store_refresh_friend_names",
+      "signature": "()->(boolean)"
+    },
+    {
+      "name": "store_friend_name",
+      "signature": "(number)->(string)"
+    }
+  ]
+}
