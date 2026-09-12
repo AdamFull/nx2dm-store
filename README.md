@@ -7,10 +7,11 @@ storefront - it only declares five independently-optional services
 A storefront integration is a separate backend module - `modules/store_steam`,
 `modules/store_egs`, `modules/store_gog`, `modules/store_stove`,
 `modules/store_microsoft`, `modules/store_google_play` and
-`modules/store_app_gallery` are built and verified so far (the mobile stores
-still to come - Samsung Galaxy Store, Amazon Appstore, Apple's App Store -
-follow `store_google_play`'s recipe rather than the desktop backends'; see
-"Adding a new backend" below).
+`modules/store_app_gallery` are built and verified so far;
+`modules/store_galaxy_store` is built too but **unverified** (no compile
+check - see its own paragraph below). The mobile stores still to come -
+Amazon Appstore, Apple's App Store - follow `store_google_play`'s recipe
+rather than the desktop backends'; see "Adding a new backend" below.
 
 The five show the same neutral interface accommodating structurally
 different SDKs: Steam's calls are mostly synchronous (a local client cache),
@@ -81,8 +82,8 @@ rather than only asserting the guard path never gets exercised.
 native/NDK API of its own at all** - Google Play Billing is pure Java
 (Kotlin, in this repo's case), confirmed absent from Google's own
 documentation and every forum thread on the question. That makes it the
-worked example for every other mobile store (Huawei App Gallery, and the
-Samsung Galaxy Store/Amazon Appstore still to come - none of them ship a
+worked example for every other mobile store (Huawei App Gallery, Samsung
+Galaxy Store, and Amazon Appstore still to come - none of them ship a
 native SDK either): a hand-written shim
 (`modules/store_google_play/android/java/com/nx2d/runtime/
 NxGooglePlayBilling.kt`) wraps the vendor's Java/Kotlin API as a set of
@@ -134,6 +135,35 @@ Play) a plain public Maven dependency with no partner-gated download - see
 `store_google_play`, it can't check base-app ownership (AppGallery itself
 already gates install) and treats every product as a durable, non-consumable
 entitlement, the same honest `StoreIap::purchase()` scope limit.
+
+`store_galaxy_store` is the third mobile backend, and the first one this
+repository **cannot compile-verify at all**: Samsung IAP has no native/NDK
+API either, so `NxSamsungIap.kt` is a third Kotlin shim sharing the same
+`nx::android` toolkit and `@JvmStatic`/`external fun` boundary shape as the
+other two, and it never registers
+`store.achievements`/`store.cloud_saves`/`store.presence` for the same "the
+SDK simply doesn't have it" reason - but unlike Google Play Billing and HMS
+IAP, which are both plain Maven dependencies, Samsung distributes the SDK
+only as a downloadable `.aar` gated behind a Samsung Developer account
+login (see "SDK delivery convention" below), so there is no way to fetch it
+without one. Every method signature and VO field name here was read from
+Samsung's own official IAP programming guide and codelab, not guessed, but
+none of it has been run through a real compiler - the same honest
+"write it now, unverified" gap the user explicitly signed off on for this
+backend, the same shape Apple's StoreKit backend will eventually have for
+an entirely different reason (no Mac/Xcode in this environment at all).
+Structurally it's the simplest of the three: `startPayment()` takes no
+Activity/request-code pair at all, resolving purely through
+`OnPaymentListener` - `IapHelper` manages launching and binding to the
+Galaxy Store checkout UI internally, so unlike `store_app_gallery` this
+backend needs no `NxActivity.ActivityResultHandler` registration, the same
+pure-listener shape Google Play Billing has. Like the other two mobile
+backends it can't check base-app ownership (Galaxy Store itself already
+gates install) and treats every product as a durable entitlement,
+acknowledging every purchase via `acknowledgePurchases()` - both right
+after a fresh purchase and for every `AcknowledgedStatus.NOT_ACKNOWLEDGED`
+entry a `getOwnedList()` re-query turns up, mirroring
+`NxGooglePlayBilling.kt`'s own `acknowledgeIfNeeded()`.
 
 This module never names a concrete store, the same discipline the scripting
 backends already keep for language neutrality - `grep`ping this module for a
@@ -204,27 +234,29 @@ passed through the cook pipeline byte-for-byte), read automatically in
 `on_attach`. One file per backend, not one shared file, so a project that
 only ships to Steam never has to know EOS's config schema, and can
 `.gitignore` just the backends whose credentials are genuinely sensitive.
-`store_microsoft`, `store_google_play` and `store_app_gallery` are the
-exceptions - none has a config file, because none has developer-supplied
-credentials to configure at *runtime* in the first place:
-`StoreContext::GetDefault()`, `BillingClient.newBuilder(context)` and
-`Iap.getIapClient(activity)` all take no per-developer id/secret, resolving
-everything from the process's own package identity (and, for
-`store_google_play`/`store_app_gallery`, the installed Play
-Store/AppGallery client) instead. `store_app_gallery`'s one credential,
+`store_microsoft`, `store_google_play`, `store_app_gallery` and
+`store_galaxy_store` are the exceptions - none has a config file, because
+none has developer-supplied credentials to configure at *runtime* in the
+first place: `StoreContext::GetDefault()`, `BillingClient.newBuilder(context)`,
+`Iap.getIapClient(activity)` and `IapHelper.getInstance(context)` all take
+no per-developer id/secret, resolving everything from the process's own
+package identity (and, for `store_google_play`/`store_app_gallery`/
+`store_galaxy_store`, the installed Play Store/AppGallery/Galaxy Store
+client) instead. `store_app_gallery`'s one credential,
 `agconnect-services.json`, is a **build-time** artifact instead - see
-"AGConnect wiring" below.
+"AGConnect wiring" below; `store_galaxy_store`'s equivalent is the vendored
+`.aar` itself - see "SDK delivery convention" below.
 
 ## SDK delivery convention
 
 A storefront SDK is developer-provided and **never committed** - vendors
 either gate the download behind a partner account (Steamworks, EOS, GOG
-Galaxy, Stove) or there's nothing to vendor at all (Microsoft Store's
-`Windows.Services.Store` ships with the Windows SDK already on the machine;
-Google Play Billing is a plain public Maven dependency, no partner account
-or download either). Each backend that does need a vendored SDK follows
-`modules/live2d`'s precedent for a big vendor SDK with its own idiosyncratic
-shape:
+Galaxy, Stove, and now Samsung IAP too) or there's nothing to vendor at all
+(Microsoft Store's `Windows.Services.Store` ships with the Windows SDK
+already on the machine; Google Play Billing and HMS IAP are plain public
+Maven dependencies, no partner account or download either). Each desktop
+backend that needs a vendored SDK follows `modules/live2d`'s precedent for
+a big vendor SDK with its own idiosyncratic shape:
 
 - `modules/store_<name>/third_party/` is gitignored per-module.
 - A small `NxStore<Name>.cmake` resolves the extracted SDK root
@@ -247,12 +279,30 @@ a portable, multi-toolset **static**-lib convention meant for a developer's
 own small prebuilt middleware, not for a vendor's own DLL layout. Storefront
 backends don't use it.
 
-A mobile backend with no native SDK at all (`store_google_play`,
-`store_app_gallery`, and every other mobile store still to come) skips
-vendoring entirely: a Gradle dependency and a hand-written JNI shim replace
+A mobile backend whose SDK is a plain Maven dependency (`store_google_play`,
+`store_app_gallery`) skips vendoring entirely: a `nxModules`-gated
+`implementation(...)` line and a hand-written JNI shim replace
 `NxStore<Name>.cmake` - see `store_google_play`'s own paragraph above, and
 `engine/core/foundation/platform/android_jni.h` for the reusable JNI toolkit
-every one of them will share.
+every mobile backend shares.
+
+`store_galaxy_store` needs a **third** vendoring shape, for the one SDK in
+this family that's both mobile (no native/NDK API, same JNI-shim
+architecture as the other two) *and* partner-gated (a real file the
+developer must supply, same as the desktop backends): the Samsung IAP
+`.aar` goes under `modules/store_galaxy_store/third_party/` - gitignored
+via that module's own `.gitignore`, following the same `/third_party/`
+pattern as `store_steam`'s/`store_gog`'s own `.gitignore` files, just
+holding a `.aar` instead of a native SDK tree - and
+`android/app/build.gradle.kts` picks it up as a local `fileTree(...)`
+dependency (`implementation(fileTree(...) { include("*.aar") })`) rather
+than a Maven coordinate, gated on `"store_galaxy_store" in nxModules` the
+same way the Maven-hosted mobile SDKs are. A missing `.aar` is a
+`GradleException` naming where to place it, not a silent skip or a
+confusing Kotlin "unresolved reference" compile error - the same bar
+`NxStore<Name>.cmake`'s own `FATAL_ERROR` sets for a missing desktop SDK,
+and the same bar `store_app_gallery`'s missing-`agconnect-services.json`
+check sets above.
 
 ## AGConnect wiring
 
