@@ -316,6 +316,20 @@ friends-list index to the `EOS_EpicAccountId` they need internally
 (`EgsPresence::friend_id_at()`), the same index-not-raw-handle shape
 `store_steam_overlay.h`'s own `open_to_friend()` already uses.
 
+`store_stove` has one too, of a completely different shape: PC Bang
+detection (`store_stove_pcbang.h`, exposed via `store_stove_scripting.h/.cpp`'s
+`host.store_stove_*` surface) - a real Korean-market storefront concept with
+no equivalent anywhere else in this family. Korean internet-cafe ("PC bang")
+venues get special in-game benefits when the SDK detects the machine is
+one. `PCBang_UserLogin` registers two callbacks at once: one fires once with
+the login result, the other fires repeatedly on the SDK's own 4-minute
+timer with refreshed benefits - there's no separate "refresh" call from the
+game side, it's push-based. `PCBang_CheckPCBangStatus` is a second,
+independent query that doesn't require a prior login. `StovePCBang`
+translates the SDK's four-way `PCBangPremium` code into the two booleans a
+game actually needs (`is_pc_bang()`, `is_premium()`) rather than exposing
+the raw enum value to Luau.
+
 `order_modules()` already rejects two modules that both declare the same
 `provided_services` entry, so if a build somehow enabled two store backends
 at once, startup fails loudly (`"exported by both"`) instead of silently
