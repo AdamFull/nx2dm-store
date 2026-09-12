@@ -182,11 +182,14 @@ eventually-consistent cache shape exactly, just populated from
 instead of JNI-exported functions, and the same static-current-instance
 dispatch convention is kept purely for consistency across the family, not
 because Objective-C++ actually needs it (a delegate object could just as
-easily hold a raw C++ pointer to the instance it belongs to). It never
-registers `store.achievements`/`store.cloud_saves`/`store.presence` for the
-same "the SDK simply doesn't have it" reason (Game Center is a separate,
-unrelated product); can't check base-app ownership (the App Store already
-gates install); and has no restore-purchases API distinct from the
+easily hold a raw C++ pointer to the instance it belongs to). It still
+never registers `store.presence` - Game Center's own friends list has been
+access-gated behind explicit per-player authorization since iOS 14, a real
+scope reduction rather than an oversight. `store.achievements`/
+`store.cloud_saves` *are* now registered, backed by Game Center - see the
+paragraph below this one. StoreKit itself can't check base-app ownership
+(the App Store already gates install); and has no restore-purchases API
+distinct from the
 transaction observer itself - `refresh_ownership()` calls
 `SKPaymentQueue.restoreCompletedTransactions`, and every restored
 transaction arrives through the *same* `updatedTransactions:` callback a
@@ -204,6 +207,43 @@ Objective-C++ is already written elsewhere in this codebase. Amazon
 Appstore, the remaining mobile storefront, was deliberately not built -
 StoreKit's own `.mm`-only pattern above is the template if it's ever
 picked back up.
+
+Game Center (`store_app_store_gamecenter_platform.h`, `_services.h`,
+`_leaderboards.h`) is a second, independent Apple framework this module now
+also covers - its own readiness has nothing to do with StoreKit's
+`canMakePayments` above. Three scope decisions worth calling out, confirmed
+with the user before writing this rather than assumed: sign-in only ever
+happens for players already signed into Game Center system-wide -
+`GKLocalPlayer.localPlayer.authenticateHandler` is registered, but its
+`UIViewController` argument is never presented, since this engine has no
+UIViewController-presentation plumbing anywhere (unlike Android's
+module-reachable `SDL_GetAndroidActivity()`, `Engine`/`ModuleContext`
+expose no native window handle to a module at all); numeric stats
+(`store_set_stat()`/`store_stat()`) always refuse, since GameKit has no
+general-purpose stat store separate from achievement progress, the same
+honest per-method gap `StoveAchievements::unlock()` already has; and Saved
+Games' conflict resolution (`resolveConflictingSavedGames:...`, surfaced
+when the same save name is written from two devices) isn't handled.
+GameKit's completion handlers, unlike StoreKit's own transaction-observer
+callbacks, aren't guaranteed to land on any particular thread - closer to
+WinRT's own shape than StoreKit's - so `GameCenterAchievements`/
+`GameCenterCloudSaves`/`GameCenterLeaderboards` all guard their cached
+state with a mutex, the same reason `MicrosoftCore`/`MicrosoftIap` already
+do, and a block can capture `this` directly rather than needing the
+static-dispatch-through-a-persistent-delegate-object indirection StoreKit's
+own classes above need (GameKit's APIs take completion-handler blocks, not
+a stateful delegate protocol). Leaderboards are a genuine extra (no neutral
+`store.leaderboards` service exists to fill, the same shape
+`EgsLeaderboards`/`SteamLeaderboards` already have), exposed through this
+module's first bespoke scripting file
+(`store_app_store_scripting.h/.cpp`) - achievements/cloud saves need none,
+since they go through the already-complete neutral
+`store/store_scripting.cpp`. Unverified for the same reason the rest of
+this module is - no Mac/Xcode anywhere in this environment - written
+against GameKit's well-established classic Objective-C completion-handler
+API rather than its newer Swift-only async/await surface (which has no
+Objective-C bridge, the same reasoning that already ruled out StoreKit 2
+above), not against live headers.
 
 This module never names a concrete store, the same discipline the scripting
 backends already keep for language neutrality - `grep`ping this module for a
