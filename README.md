@@ -5,11 +5,12 @@ storefront - it only declares five independently-optional services
 (`store_service.h`) and exposes the neutral `host.store_*` Luau surface
 (`store_scripting.cpp`) that forwards to whichever backend module is active.
 A storefront integration is a separate backend module - `modules/store_steam`,
-`modules/store_egs`, `modules/store_gog` and `modules/store_stove` are built
-and verified so far; see "Adding a new backend" below for the recipe the
-rest (Microsoft Store, ...) follow.
+`modules/store_egs`, `modules/store_gog`, `modules/store_stove` and
+`modules/store_microsoft` are built and verified so far - the full set this
+architecture originally set out to cover, save mobile stores (see "Adding a
+new backend" below for the recipe those would follow too).
 
-The four show the same neutral interface accommodating structurally
+The five show the same neutral interface accommodating structurally
 different SDKs: Steam's calls are mostly synchronous (a local client cache),
 while every single EOS call is asynchronous (a plain C completion callback
 resolved by `EOS_Platform_Tick`, even for a "simple" read) - `store_egs`
@@ -33,7 +34,7 @@ narrowest of the three: `IUser::SignInGalaxy()` requires a real, locally
 installed and running GOG Galaxy Client - there is no device-id-style
 headless option the way EOS has.
 
-STOVE is the outlier of the four: every one of its callbacks is a **plain C
+STOVE is the outlier of the first four: every one of its callbacks is a **plain C
 function pointer with no userdata parameter at all** (contrast EOS's
 trailing `void* ClientData` or GOG's listener-object dispatch), so
 `store_stove` routes each callback through a static "current instance"
@@ -51,6 +52,28 @@ different kind of gap than a whole service being absent (see below): one
 method degraded within an otherwise-real service, the same way
 `store_gog`'s `bytes_used()`/`bytes_total()` always report 0 for a missing
 quota API while the rest of `StoreCloudSaves` works.
+
+`store_microsoft` is the structural outlier of all five, in three ways at
+once. First, it needs no vendor SDK and no per-project config file at all -
+the C++/WinRT projection headers for `Windows.Services.Store` already ship
+inside the installed Windows SDK, and `StoreContext::GetDefault()` takes no
+parameters, resolving everything from the process's own package identity
+instead of a developer-supplied id/secret. Second, it has no per-frame pump:
+`IAsyncOperation<T>::Completed()` resolves on its own WinRT thread-pool
+thread, not from an explicit `RunCallbacks()`-style call this module would
+otherwise have to schedule every frame like the other four all do - so its
+two services guard their cached state with a mutex instead of relying on
+"only ever touched from the game's own tick." Third, and most
+fundamentally, its one real precondition is neither a running client nor a
+signed-in session but **package identity itself**: `Windows.Services.Store`
+flatly refuses to do anything inside an ordinary unpackaged Win32 exe
+(`APPMODEL_ERROR_NO_PACKAGE`) - exactly what `nx2d.exe` is, with no MSIX
+packaging step anywhere in this project - so `store_microsoft` is
+structurally idle in every build this repository can currently produce.
+That's a real, verifiable guard condition rather than a hypothetical one:
+`GetCurrentPackageFullName()` (a synchronous, side-effect-free Win32 call,
+no WinRT involved) is cheap enough that its own test asserts it for real
+rather than only asserting the guard path never gets exercised.
 
 This module never names a concrete store, the same discipline the scripting
 backends already keep for language neutrality - `grep`ping this module for a
@@ -83,7 +106,10 @@ API to check first. `store_gog` is the same shape for a different service:
 the vendored GOG Galaxy SDK has no purchase/checkout API at all (confirmed
 absent from every header - only entitlement checks,
 `IApps::IsDlcOwned()`/`IsDlcInstalled()`, which `store.core` already covers),
-so it never registers `StoreIap` either.
+so it never registers `StoreIap` either. `store_microsoft` registers only
+`store.core`/`store.iap` for the same reason: `Windows.Services.Store` has
+no achievements/stats/cloud-save/friends API of its own at all (Xbox's
+equivalents live in the separate, much larger Xbox Live/GDK SDK).
 
 A backend can also expose capabilities that don't belong in this neutral
 interface at all - Steam's Workshop, leaderboards, and explicit overlay
@@ -118,6 +144,10 @@ passed through the cook pipeline byte-for-byte), read automatically in
 `on_attach`. One file per backend, not one shared file, so a project that
 only ships to Steam never has to know EOS's config schema, and can
 `.gitignore` just the backends whose credentials are genuinely sensitive.
+`store_microsoft` is the one exception - it has no config file at all,
+because it has no developer-supplied credentials to configure in the first
+place: `StoreContext::GetDefault()` takes no parameters, resolving
+everything from the process's own package identity instead.
 
 ## SDK delivery convention
 
@@ -148,4 +178,6 @@ Copy `modules/store_steam`'s shape: `NxStore<Name>.cmake` (if it vendors an
 SDK) + `<name>_module.cpp` (provide whichever of the five services its SDK
 supports, `on_attach` reads `store_<name>.ini`) + `<name>_config.h/.cpp` +
 `manifest.json` + `tests/`. See that module's own comments for the concrete
-worked example, and the CMake infra above for what's already shared.
+worked example, and the CMake infra above for what's already shared. Skip
+the CMake vendoring step and the config file entirely if the backend needs
+neither - `modules/store_microsoft` is the worked example for that case.
