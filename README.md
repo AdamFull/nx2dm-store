@@ -4,14 +4,14 @@ The neutral storefront interface. `modules/store` itself talks to no
 storefront - it only declares five independently-optional services
 (`store_service.h`) and exposes the neutral `host.store_*` Luau surface
 (`store_scripting.cpp`) that forwards to whichever backend module is active.
-A storefront integration is a separate backend module - `modules/store_steam`
-and `modules/store_egs` are built and verified so far; see "Adding a new
-backend" below for the recipe the rest (GOG Galaxy, Stove, Microsoft Store,
-...) follow.
+A storefront integration is a separate backend module - `modules/store_steam`,
+`modules/store_egs` and `modules/store_gog` are built and verified so far;
+see "Adding a new backend" below for the recipe the rest (Stove, Microsoft
+Store, ...) follow.
 
-The two show the same neutral interface accommodating structurally different
-SDKs: Steam's calls are mostly synchronous (a local client cache), while
-every single EOS call is asynchronous (a plain C completion callback
+The three show the same neutral interface accommodating structurally
+different SDKs: Steam's calls are mostly synchronous (a local client cache),
+while every single EOS call is asynchronous (a plain C completion callback
 resolved by `EOS_Platform_Tick`, even for a "simple" read) - `store_egs`
 handles this with small per-service caches populated by each query's
 callback, with the neutral interface's synchronous methods reading whatever
@@ -22,7 +22,16 @@ session that has no headless equivalent - `store_egs` attempts the closest
 thing (silently reusing a previously cached Epic login, if any) and
 degrades those four to empty/`false` when it's unavailable, the same
 absent-service shape Stove's missing cloud-saves/presence already
-established.
+established. GOG Galaxy sits between the two: most calls are synchronous
+local-cache reads like Steam's (`IStorage`, `IFriends`'s own persona/friend
+accessors, `IStats`'s Get/Set once signed in), but DLC ownership, the
+stats/achievements cache load, and the friends list are still listener-based
+like EOS's - and unlike either, Galaxy has no per-call return-value error
+signaling at all, so `store_gog` checks a thread-local `galaxy::api::
+GetError()` after every call that can fail. Its sign-in is also the
+narrowest of the three: `IUser::SignInGalaxy()` requires a real, locally
+installed and running GOG Galaxy Client - there is no device-id-style
+headless option the way EOS has.
 
 This module never names a concrete store, the same discipline the scripting
 backends already keep for language neutrality - `grep`ping this module for a
@@ -49,7 +58,11 @@ absent service: it returns `nullptr`. A backend whose SDK has no cloud-save
 or presence subsystem (Stove, for one - its SDK genuinely has neither) simply
 never registers `StoreCloudSaves`/`StorePresence`, and every neutral Luau
 function above degrades to a safe `false`/empty return. There is no separate
-capability-flag API to check first.
+capability-flag API to check first. `store_gog` is the same shape for a
+different service: the vendored GOG Galaxy SDK has no purchase/checkout API
+at all (confirmed absent from every header - only entitlement checks,
+`IApps::IsDlcOwned()`/`IsDlcInstalled()`, which `store.core` already covers),
+so it never registers `StoreIap` either.
 
 A backend can also expose capabilities that don't belong in this neutral
 interface at all - Steam's Workshop, leaderboards, and explicit overlay
