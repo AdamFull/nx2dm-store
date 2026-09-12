@@ -42,7 +42,7 @@ public:
   /// has no bulk query and only checks the one DLC named by @p dlc_id (an
   /// empty id is a no-op there). A synchronous backend (Steam) needs no
   /// override at all - its getters already read live SDK state every call.
-  virtual void refresh_ownership(nx::string_view dlc_id = {}) {}
+  virtual void refresh_ownership(nx::string_view = {}) {}
 };
 
 struct StoreProduct {
@@ -72,7 +72,7 @@ public:
   /// query (Play Billing, HMS IAP, Samsung IAP, StoreKit) need @p
   /// product_ids up front; backends with a real catalogue query (Steam,
   /// EOS, Stove, Microsoft Store) already fetch everything and ignore it.
-  virtual void refresh_products(const nx::vector<nx::string> &product_ids = {}) {}
+  virtual void refresh_products(const nx::vector<nx::string> & = {}) {}
 };
 
 class StoreAchievements {
@@ -96,7 +96,7 @@ public:
   /// called). Most backends refresh everything in one shot regardless of
   /// @p stat_ids; Stove has no bulk stat query and only refreshes the stats
   /// named there (achievement ids/unlock state still refresh in bulk).
-  virtual void refresh(const nx::vector<nx::string> &stat_ids = {}) {}
+  virtual void refresh(const nx::vector<nx::string> & = {}) {}
 };
 
 /// Small key/value cloud saves - not a file API. A backend maps this onto
