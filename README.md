@@ -5,10 +5,12 @@ storefront - it only declares five independently-optional services
 (`store_service.h`) and exposes the neutral `host.store_*` Luau surface
 (`store_scripting.cpp`) that forwards to whichever backend module is active.
 A storefront integration is a separate backend module - `modules/store_steam`,
-`modules/store_egs`, `modules/store_gog`, `modules/store_stove` and
-`modules/store_microsoft` are built and verified so far - the full set this
-architecture originally set out to cover, save mobile stores (see "Adding a
-new backend" below for the recipe those would follow too).
+`modules/store_egs`, `modules/store_gog`, `modules/store_stove`,
+`modules/store_microsoft` and `modules/store_google_play` are built and
+verified so far (the mobile stores still to come - Huawei App Gallery,
+Samsung Galaxy Store, Amazon Appstore, Apple's App Store - follow
+`store_google_play`'s recipe rather than the desktop backends'; see
+"Adding a new backend" below).
 
 The five show the same neutral interface accommodating structurally
 different SDKs: Steam's calls are mostly synchronous (a local client cache),
@@ -74,6 +76,37 @@ That's a real, verifiable guard condition rather than a hypothetical one:
 `GetCurrentPackageFullName()` (a synchronous, side-effect-free Win32 call,
 no WinRT involved) is cheap enough that its own test asserts it for real
 rather than only asserting the guard path never gets exercised.
+
+`store_google_play` is the first mobile backend, and the first with **no
+native/NDK API of its own at all** - Google Play Billing is pure Java
+(Kotlin, in this repo's case), confirmed absent from Google's own
+documentation and every forum thread on the question. That makes it the
+worked example for every other mobile store still to come (Huawei App
+Gallery, Samsung Galaxy Store, Amazon Appstore - none of them ship a native
+SDK either): a hand-written shim
+(`modules/store_google_play/android/java/com/nx2d/runtime/
+NxGooglePlayBilling.kt`) wraps the vendor's Java/Kotlin API as a set of
+`@JvmStatic` functions the C++ side calls via JNI, and reports results back
+through a matching set of JNI-exported C++ functions the shim calls
+directly - the first Java-calls-C++ direction in this codebase (every
+existing JNI caller, e.g. haptics, only goes the other way). The JNI
+plumbing itself - class/method lookup, string and array marshalling - lives
+in `engine/core/foundation/platform/android_jni.h` (`nx::android`), moved
+and expanded out of what used to be a runtime-only, haptics-specific
+helper, precisely so the next three mobile backends can reuse it rather
+than re-inventing it. A module contributes Kotlin/Java sources and a
+Gradle dependency the same conditional way it contributes C++
+(`android/app/build.gradle.kts`'s per-module source-dir loop and a `nxModules`-gated
+`implementation(...)` line) - `store_google_play`'s shim is never
+referenced from any unconditionally-compiled file, so a build without the
+module carries none of Billing Library's code, permissions, or dependency
+weight. Like `store_gog`, it can't check base-app ownership (the Play
+Store itself already gates who can install/run the APK) and like
+`store_stove`'s achievements, one operation has no honest mapping: Play
+Billing's consumable/durable split doesn't exist in `StoreIap::purchase()`,
+so every product is treated as a durable entitlement (`acknowledgePurchase`,
+never `consumeAsync`) - a consumable-currency product isn't served by this
+backend.
 
 This module never names a concrete store, the same discipline the scripting
 backends already keep for language neutrality - `grep`ping this module for a
@@ -144,19 +177,23 @@ passed through the cook pipeline byte-for-byte), read automatically in
 `on_attach`. One file per backend, not one shared file, so a project that
 only ships to Steam never has to know EOS's config schema, and can
 `.gitignore` just the backends whose credentials are genuinely sensitive.
-`store_microsoft` is the one exception - it has no config file at all,
-because it has no developer-supplied credentials to configure in the first
-place: `StoreContext::GetDefault()` takes no parameters, resolving
-everything from the process's own package identity instead.
+`store_microsoft` and `store_google_play` are the exceptions - neither has
+a config file, because neither has developer-supplied credentials to
+configure at runtime in the first place: `StoreContext::GetDefault()` and
+`BillingClient.newBuilder(context)` both take no per-developer id/secret,
+resolving everything from the process's own package identity (and, for
+`store_google_play`, the installed Play Store client) instead.
 
 ## SDK delivery convention
 
 A storefront SDK is developer-provided and **never committed** - vendors
 either gate the download behind a partner account (Steamworks, EOS, GOG
 Galaxy, Stove) or there's nothing to vendor at all (Microsoft Store's
-`Windows.Services.Store` ships with the Windows SDK already on the machine).
-Each backend that does need one follows `modules/live2d`'s precedent for a
-big vendor SDK with its own idiosyncratic shape:
+`Windows.Services.Store` ships with the Windows SDK already on the machine;
+Google Play Billing is a plain public Maven dependency, no partner account
+or download either). Each backend that does need a vendored SDK follows
+`modules/live2d`'s precedent for a big vendor SDK with its own idiosyncratic
+shape:
 
 - `modules/store_<name>/third_party/` is gitignored per-module.
 - A small `NxStore<Name>.cmake` resolves the extracted SDK root
@@ -166,11 +203,25 @@ big vendor SDK with its own idiosyncratic shape:
   the built executable).
 - A missing SDK is a `FATAL_ERROR` naming the vendor's download page, not a
   silent skip.
+- Before that resolution even runs, the module's own `CMakeLists.txt` checks
+  it's actually being built for a platform this SDK was ever vendored for
+  and `return()`s (a `STATUS` "module skipped" message, not a `FATAL_ERROR`)
+  otherwise - `nx_module()`'s own `PLATFORMS` gate runs too late to help,
+  since a project's module list isn't per-platform (a project also
+  targeting Android still passes `-DNX_MODULE_STORE_GOG=ON` for a
+  Windows-only backend, for instance).
 
 `cmake/NxModules.cmake`'s `nx_module_prebuilt()` is a *different* mechanism -
 a portable, multi-toolset **static**-lib convention meant for a developer's
 own small prebuilt middleware, not for a vendor's own DLL layout. Storefront
 backends don't use it.
+
+A mobile backend with no native SDK at all (`store_google_play`, and every
+other mobile store still to come) skips vendoring entirely: a Gradle
+dependency and a hand-written JNI shim replace `NxStore<Name>.cmake` - see
+`store_google_play`'s own paragraph above, and `engine/core/foundation/
+platform/android_jni.h` for the reusable JNI toolkit every one of them
+will share.
 
 ## Adding a new backend
 
