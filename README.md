@@ -111,6 +111,50 @@ so every product is treated as a durable entitlement (`acknowledgePurchase`,
 never `consumeAsync`) - a consumable-currency product isn't served by this
 backend.
 
+Play Games Services (`store_google_play_gamesservices_platform.h`,
+`_services.h`, `_leaderboards.h`, a second Kotlin shim
+`NxPlayGamesServices.kt` alongside `NxGooglePlayBilling.kt`) is a second,
+independent Google framework this module now also covers - its own
+readiness (sign-in state) has nothing to do with Play Billing's
+`BillingClient` connection above. It never registers `store.presence` -
+Play Games' own friends/presence surface needs its own broader scoping
+pass, out of scope here (the same per-player-authorization reasoning
+`store_app_store`'s Game Center already applies to its own presence
+exclusion). `store.achievements`/`store.cloud_saves` *are* now registered,
+backed by Play Games Services. Unlike Game Center on iOS, sign-in here can
+be genuinely interactive: `store_google_play_sign_in()` calls
+`GamesSignInClient.signIn()`, which Google's own SDK presents as a system
+overlay the app never has to host anything for - Android's module already
+holds a full `Activity` via `SDL_GetAndroidActivity()`, the plumbing gap
+that kept Game Center to a silent-only check on iOS. Two scope decisions
+mirror Game Center's own, for the same underlying reasons: numeric stats
+(`store_set_stat()`/`store_stat()`) always refuse, since Play Games has no
+general-purpose stat store separate from (incremental) achievement
+progress; and Snapshots' conflict resolution beyond
+`RESOLUTION_POLICY_MOST_RECENTLY_MODIFIED`'s own auto-resolution isn't
+handled - a real, narrower scope reduction, not an oversight.
+`AchievementsClient.unlock()` has no completion callback at all in
+Google's own API (unlike everything else here, which reports back through
+`nativeOnXxx` JNI exports the same direction `NxGooglePlayBilling.kt`
+already established) - `PlayGamesAchievements::unlock()` updates its
+cache optimistically the moment the JNI call returns, the same "assume
+success" shape `EgsAchievements::unlock()` uses by choice, but here
+because the SDK genuinely never confirms. Leaderboards are a genuine extra
+(no neutral `store.leaderboards` service exists to fill, the same shape
+`EgsLeaderboards`/`GameCenterLeaderboards` already have) with a real
+score-upload call (`submitScoreImmediate`), unlike EOS's own
+stat-ingestion detour - exposed through this module's first bespoke
+scripting file (`store_google_play_gamesservices_scripting.h/.cpp`);
+achievements/cloud saves need none, since they go through the
+already-complete neutral `store/store_scripting.cpp`. Verifiable further
+than Game Center could be: this environment has a working Android SDK/NDK,
+so a real Gradle+NDK compile of the new Kotlin shim and JNI-calling C++ was
+actually attempted (see the module's own build log/commit for the
+outcome), not merely written against documentation the way the rest of
+this paragraph's design decisions were - no attached device means sign-in/
+achievements/leaderboards/snapshots were never exercised at runtime,
+though.
+
 `store_app_gallery` is the second mobile backend, following
 `store_google_play`'s recipe exactly - HMS IAP Kit has no native/NDK API
 either, so `NxHuaweiIap.kt` is a second Kotlin shim sharing the same
