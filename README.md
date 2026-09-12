@@ -5,11 +5,11 @@ storefront - it only declares five independently-optional services
 (`store_service.h`) and exposes the neutral `host.store_*` Luau surface
 (`store_scripting.cpp`) that forwards to whichever backend module is active.
 A storefront integration is a separate backend module - `modules/store_steam`,
-`modules/store_egs` and `modules/store_gog` are built and verified so far;
-see "Adding a new backend" below for the recipe the rest (Stove, Microsoft
-Store, ...) follow.
+`modules/store_egs`, `modules/store_gog` and `modules/store_stove` are built
+and verified so far; see "Adding a new backend" below for the recipe the
+rest (Microsoft Store, ...) follow.
 
-The three show the same neutral interface accommodating structurally
+The four show the same neutral interface accommodating structurally
 different SDKs: Steam's calls are mostly synchronous (a local client cache),
 while every single EOS call is asynchronous (a plain C completion callback
 resolved by `EOS_Platform_Tick`, even for a "simple" read) - `store_egs`
@@ -33,6 +33,25 @@ narrowest of the three: `IUser::SignInGalaxy()` requires a real, locally
 installed and running GOG Galaxy Client - there is no device-id-style
 headless option the way EOS has.
 
+STOVE is the outlier of the four: every one of its callbacks is a **plain C
+function pointer with no userdata parameter at all** (contrast EOS's
+trailing `void* ClientData` or GOG's listener-object dispatch), so
+`store_stove` routes each callback through a static "current instance"
+pointer per service class instead - safe only because exactly one store
+backend module is ever active in a process at a time, the same invariant
+`order_modules()` already enforces below. STOVE also assumes a launcher
+already authenticated the user before the game process started (there is no
+Login call in its SDK at all, only read-only accessors for the
+already-signed-in session), and its achievements are entirely
+server-computed from a Stat crossing a goal value the SDK never names -
+`StoveAchievements::unlock()` has no honest implementation against this SDK
+and always refuses, even though the rest of that service (numeric stats,
+reading unlock status, listing achievement ids) works normally. This is a
+different kind of gap than a whole service being absent (see below): one
+method degraded within an otherwise-real service, the same way
+`store_gog`'s `bytes_used()`/`bytes_total()` always report 0 for a missing
+quota API while the rest of `StoreCloudSaves` works.
+
 This module never names a concrete store, the same discipline the scripting
 backends already keep for language neutrality - `grep`ping this module for a
 store name should never turn up a hit.
@@ -55,12 +74,14 @@ own services.
 
 "Optional" means exactly what `ServiceProvider::find<T>` already does for any
 absent service: it returns `nullptr`. A backend whose SDK has no cloud-save
-or presence subsystem (Stove, for one - its SDK genuinely has neither) simply
-never registers `StoreCloudSaves`/`StorePresence`, and every neutral Luau
-function above degrades to a safe `false`/empty return. There is no separate
-capability-flag API to check first. `store_gog` is the same shape for a
-different service: the vendored GOG Galaxy SDK has no purchase/checkout API
-at all (confirmed absent from every header - only entitlement checks,
+or presence subsystem (STOVE, for one - its SDK genuinely has neither, only
+a bare `Base_GetCloudSavingPath()` path string with no read/write/list API
+attached, and zero friends/presence hits anywhere) simply never registers
+`StoreCloudSaves`/`StorePresence`, and every neutral Luau function above
+degrades to a safe `false`/empty return. There is no separate capability-flag
+API to check first. `store_gog` is the same shape for a different service:
+the vendored GOG Galaxy SDK has no purchase/checkout API at all (confirmed
+absent from every header - only entitlement checks,
 `IApps::IsDlcOwned()`/`IsDlcInstalled()`, which `store.core` already covers),
 so it never registers `StoreIap` either.
 
