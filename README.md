@@ -6,10 +6,10 @@ storefront - it only declares five independently-optional services
 (`store_scripting.cpp`) that forwards to whichever backend module is active.
 A storefront integration is a separate backend module - `modules/store_steam`,
 `modules/store_egs`, `modules/store_gog`, `modules/store_stove`,
-`modules/store_microsoft` and `modules/store_google_play` are built and
-verified so far (the mobile stores still to come - Huawei App Gallery,
-Samsung Galaxy Store, Amazon Appstore, Apple's App Store - follow
-`store_google_play`'s recipe rather than the desktop backends'; see
+`modules/store_microsoft`, `modules/store_google_play` and
+`modules/store_app_gallery` are built and verified so far (the mobile stores
+still to come - Samsung Galaxy Store, Amazon Appstore, Apple's App Store -
+follow `store_google_play`'s recipe rather than the desktop backends'; see
 "Adding a new backend" below).
 
 The five show the same neutral interface accommodating structurally
@@ -81,9 +81,9 @@ rather than only asserting the guard path never gets exercised.
 native/NDK API of its own at all** - Google Play Billing is pure Java
 (Kotlin, in this repo's case), confirmed absent from Google's own
 documentation and every forum thread on the question. That makes it the
-worked example for every other mobile store still to come (Huawei App
-Gallery, Samsung Galaxy Store, Amazon Appstore - none of them ship a native
-SDK either): a hand-written shim
+worked example for every other mobile store (Huawei App Gallery, and the
+Samsung Galaxy Store/Amazon Appstore still to come - none of them ship a
+native SDK either): a hand-written shim
 (`modules/store_google_play/android/java/com/nx2d/runtime/
 NxGooglePlayBilling.kt`) wraps the vendor's Java/Kotlin API as a set of
 `@JvmStatic` functions the C++ side calls via JNI, and reports results back
@@ -107,6 +107,33 @@ Billing's consumable/durable split doesn't exist in `StoreIap::purchase()`,
 so every product is treated as a durable entitlement (`acknowledgePurchase`,
 never `consumeAsync`) - a consumable-currency product isn't served by this
 backend.
+
+`store_app_gallery` is the second mobile backend, following
+`store_google_play`'s recipe exactly - HMS IAP Kit has no native/NDK API
+either, so `NxHuaweiIap.kt` is a second Kotlin shim sharing the same
+`nx::android` JNI toolkit and `@JvmStatic`/`external fun` boundary shape as
+`NxGooglePlayBilling.kt`, and it never registers
+`store.achievements`/`store.cloud_saves`/`store.presence` for the same
+"the SDK simply doesn't have it" reason (HUAWEI Game Service is a separate
+product). Two things about it are genuinely bigger than Google Play's
+integration, though. First, HMS IAP Kit's purchase flow (`createPurchaseIntent()`)
+*and* its up-front environment check (`isEnvReady()`, which can require
+signing into a HUAWEI ID the device has none of) both resolve through
+`Activity.onActivityResult()` - Play Billing needs none of that, so
+supporting it meant adding a small, module-agnostic extension point to the
+always-compiled `NxActivity.java`
+(`NxActivity.ActivityResultHandler`/`registerActivityResultHandler()`):
+`NxActivity` itself never references `store_app_gallery` by name, a module
+self-registers a handler the first time its platform layer initializes, and
+a build without the module carries no dispatch overhead at all (an empty
+handler list). Second, HMS IAP Kit needs the Huawei AGConnect Gradle plugin
+plus a per-app `agconnect-services.json` credential file, mirroring how a
+desktop backend needs a vendored SDK even though this one is (like Google
+Play) a plain public Maven dependency with no partner-gated download - see
+"AGConnect wiring" below for exactly how that gets threaded through. Like
+`store_google_play`, it can't check base-app ownership (AppGallery itself
+already gates install) and treats every product as a durable, non-consumable
+entitlement, the same honest `StoreIap::purchase()` scope limit.
 
 This module never names a concrete store, the same discipline the scripting
 backends already keep for language neutrality - `grep`ping this module for a
@@ -177,12 +204,16 @@ passed through the cook pipeline byte-for-byte), read automatically in
 `on_attach`. One file per backend, not one shared file, so a project that
 only ships to Steam never has to know EOS's config schema, and can
 `.gitignore` just the backends whose credentials are genuinely sensitive.
-`store_microsoft` and `store_google_play` are the exceptions - neither has
-a config file, because neither has developer-supplied credentials to
-configure at runtime in the first place: `StoreContext::GetDefault()` and
-`BillingClient.newBuilder(context)` both take no per-developer id/secret,
-resolving everything from the process's own package identity (and, for
-`store_google_play`, the installed Play Store client) instead.
+`store_microsoft`, `store_google_play` and `store_app_gallery` are the
+exceptions - none has a config file, because none has developer-supplied
+credentials to configure at *runtime* in the first place:
+`StoreContext::GetDefault()`, `BillingClient.newBuilder(context)` and
+`Iap.getIapClient(activity)` all take no per-developer id/secret, resolving
+everything from the process's own package identity (and, for
+`store_google_play`/`store_app_gallery`, the installed Play
+Store/AppGallery client) instead. `store_app_gallery`'s one credential,
+`agconnect-services.json`, is a **build-time** artifact instead - see
+"AGConnect wiring" below.
 
 ## SDK delivery convention
 
@@ -216,12 +247,68 @@ a portable, multi-toolset **static**-lib convention meant for a developer's
 own small prebuilt middleware, not for a vendor's own DLL layout. Storefront
 backends don't use it.
 
-A mobile backend with no native SDK at all (`store_google_play`, and every
-other mobile store still to come) skips vendoring entirely: a Gradle
-dependency and a hand-written JNI shim replace `NxStore<Name>.cmake` - see
-`store_google_play`'s own paragraph above, and `engine/core/foundation/
-platform/android_jni.h` for the reusable JNI toolkit every one of them
-will share.
+A mobile backend with no native SDK at all (`store_google_play`,
+`store_app_gallery`, and every other mobile store still to come) skips
+vendoring entirely: a Gradle dependency and a hand-written JNI shim replace
+`NxStore<Name>.cmake` - see `store_google_play`'s own paragraph above, and
+`engine/core/foundation/platform/android_jni.h` for the reusable JNI toolkit
+every one of them will share.
+
+## AGConnect wiring
+
+`store_app_gallery` is the only backend so far whose Gradle plugin has no
+plugin-marker artifact for the modern `plugins{}` DSL (confirmed by
+decompiling `agcp-1.9.6.300.jar`: Gradle cannot resolve
+`com.huawei.agconnect` as a plugin id from any repository, Huawei's own
+included) - it only ships the classic buildscript-classpath form, so it
+needs more threading through than a `nxModules`-gated `implementation(...)`
+line:
+
+- The top-level `build.gradle.kts` (template + every real project copy)
+  declares `classpath("com.huawei.agconnect:agcp:1.9.6.300")` in a
+  `buildscript {}` block, resolved from the Huawei Maven repo
+  (`https://developer.huawei.com/repo/`, also registered in
+  `settings.gradle.kts`'s `dependencyResolutionManagement.repositories` for
+  the plain `com.huawei.hms:iap` dependency itself).
+- `settings.gradle.kts` also declares an otherwise-empty `libs` version
+  catalog with one entry: `plugin("android-application",
+  "com.android.application").version(...)`. This isn't for our own use -
+  decompiling the plugin showed its `GradleVersionTool` determines the
+  Android Gradle Plugin version by first scanning buildscript classpath
+  dependencies for a classic `com.android.tools.build:gradle` entry (which
+  this project has none of, since AGP is applied through the `plugins{}`
+  DSL), then falling back to reading `libs.plugins.android.application`
+  from a catalog literally named `libs` - failing outright
+  (`Catalog named libs doesn't exist` / `No value present`) if neither
+  exists. This project has no real version catalog of its own; the entry
+  exists purely to satisfy that lookup, and its version must be kept in
+  sync with `id("com.android.application")`'s own version.
+- `android/app/build.gradle.kts` declares `id("com.huawei.agconnect") apply
+  false` beside `com.android.application`, then - only when
+  `store_app_gallery` is in `nxModules` - copies the project's own
+  `android/agconnect-services.json` into the shared `:app` module directory
+  (the plugin reads it synchronously at configuration time, so the copy
+  must happen before `apply(plugin = "com.huawei.agconnect")` runs, the same
+  ordering constraint as everything else in this file that touches
+  configuration-time state) and applies the plugin. A project with the
+  module enabled but no `android/agconnect-services.json` gets a clear
+  `GradleException` up front instead of a mysterious plugin failure.
+- `com.huawei.hms:iap`'s own manifest sets `android:allowBackup="false"`;
+  the shared `android/app/src/main/AndroidManifest.xml` carries
+  `tools:replace="android:allowBackup"` on its `<application>` tag
+  unconditionally (inert when no enabled module conflicts on that attribute)
+  so the manifest merger has a winner to pick instead of failing the build.
+
+Verified end-to-end with a synthetic placeholder
+`agconnect-services.json` (structurally valid, no real Huawei backend
+behind it) - `nx.py build -p android --project projects/samples --abi
+arm64-v8a` with only `store`/`store_app_gallery` enabled produces a real
+signed-and-packaged APK. A real project still needs its own genuine
+`agconnect-services.json` from AppGallery Connect (which itself needs a
+verified Huawei Developer account with Merchant Service enabled) for HMS
+IAP to do anything at runtime - that account-verification step is a real
+environment limitation this repository can't shortcut, the same kind of gap
+`store_microsoft`'s package-identity requirement already documents above.
 
 ## Adding a new backend
 
