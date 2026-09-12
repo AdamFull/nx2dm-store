@@ -290,6 +290,32 @@ that one backend module will ever look them up) and get their own
 (`store_steam_scripting.h/.cpp`), keeping `store/store_scripting.cpp` itself
 strictly neutral.
 
+`store_egs` has the same shape for a second real capability set, grounded in
+the vendored EOS SDK's own `eos_leaderboards.h`/`eos_ui.h`/`eos_mods.h`
+(`store_egs_leaderboards.h`, `store_egs_overlay.h`, `store_egs_mods.h`,
+exposed via `store_egs_scripting.h/.cpp`'s `host.store_egs_*` surface) - two
+real scope differences from Steam's version worth calling out rather than
+treating as gaps. First, EOS Leaderboards has no score-upload API at all: a
+leaderboard is tied to a stat name server-side, so submitting a score is
+just calling `store_set_stat(stat_name, value)` (the neutral achievements
+surface, `EOS_Stats_IngestStat`) - `EgsLeaderboards` only covers the read
+side (`EOS_Leaderboards_QueryLeaderboardRanks`, simpler than Steam's own
+find-then-download flow since EOS queries by leaderboard id directly and
+each returned record already carries rank/score/display name together, no
+separate friends lookup needed). Second, EOS Mods only manages
+Epic-launcher-installed mods (install/uninstall/update/enumerate) - there is
+no publish/upload API the way Steam Workshop has one; installing or
+updating a mod needs its full `EOS_Mod_Identifier` (namespace/item/artifact
+id + title + version), not a bare id, so `EgsMods` discovers mods through
+`EnumerateMods`+`CopyModInfo` first and every mutating call takes an index
+into that cached list, the same shape `store/store_scripting.cpp`'s own
+`ProductCache` already established for exactly this reason. The
+social-overlay control (`EgsOverlay`) is the closest one-to-one match to
+Steam's - `ShowBlockPlayer`/`ShowReportPlayer`/`ShowNativeProfile` resolve a
+friends-list index to the `EOS_EpicAccountId` they need internally
+(`EgsPresence::friend_id_at()`), the same index-not-raw-handle shape
+`store_steam_overlay.h`'s own `open_to_friend()` already uses.
+
 `order_modules()` already rejects two modules that both declare the same
 `provided_services` entry, so if a build somehow enabled two store backends
 at once, startup fails loudly (`"exported by both"`) instead of silently
