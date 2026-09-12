@@ -95,13 +95,15 @@ plumbing itself - class/method lookup, string and array marshalling - lives
 in `engine/core/foundation/platform/android_jni.h` (`nx::android`), moved
 and expanded out of what used to be a runtime-only, haptics-specific
 helper, precisely so the next three mobile backends can reuse it rather
-than re-inventing it. A module contributes Kotlin/Java sources and a
-Gradle dependency the same conditional way it contributes C++
-(`android/app/build.gradle.kts`'s per-module source-dir loop and a `nxModules`-gated
-`implementation(...)` line) - `store_google_play`'s shim is never
-referenced from any unconditionally-compiled file, so a build without the
-module carries none of Billing Library's code, permissions, or dependency
-weight. Like `store_gog`, it can't check base-app ownership (the Play
+than re-inventing it. A module contributes Kotlin/Java sources the same
+conditional way it contributes C++ (`android/app/build.gradle.kts`'s
+per-module source-dir loop), and its own Gradle dependencies through its
+own `modules/store_google_play/android/build.gradle.kts` - see "Android
+Gradle wiring" below for the mechanism every mobile backend uses.
+`store_google_play`'s shim is never referenced from any
+unconditionally-compiled file, so a build without the module carries none
+of Billing Library's code, permissions, or dependency weight. Like
+`store_gog`, it can't check base-app ownership (the Play
 Store itself already gates who can install/run the APK) and like
 `store_stove`'s achievements, one operation has no honest mapping: Play
 Billing's consumable/durable split doesn't exist in `StoreIap::purchase()`,
@@ -131,7 +133,8 @@ handler list). Second, HMS IAP Kit needs the Huawei AGConnect Gradle plugin
 plus a per-app `agconnect-services.json` credential file, mirroring how a
 desktop backend needs a vendored SDK even though this one is (like Google
 Play) a plain public Maven dependency with no partner-gated download - see
-"AGConnect wiring" below for exactly how that gets threaded through. Like
+"Android Gradle wiring" below for exactly how that gets threaded through,
+entirely from this module's own files. Like
 `store_google_play`, it can't check base-app ownership (AppGallery itself
 already gates install) and treats every product as a durable, non-consumable
 entitlement, the same honest `StoreIap::purchase()` scope limit.
@@ -244,7 +247,7 @@ package identity (and, for `store_google_play`/`store_app_gallery`/
 `store_galaxy_store`, the installed Play Store/AppGallery/Galaxy Store
 client) instead. `store_app_gallery`'s one credential,
 `agconnect-services.json`, is a **build-time** artifact instead - see
-"AGConnect wiring" below; `store_galaxy_store`'s equivalent is the vendored
+"Android Gradle wiring" below; `store_galaxy_store`'s equivalent is the vendored
 `.aar` itself - see "SDK delivery convention" below.
 
 ## SDK delivery convention
@@ -280,11 +283,12 @@ own small prebuilt middleware, not for a vendor's own DLL layout. Storefront
 backends don't use it.
 
 A mobile backend whose SDK is a plain Maven dependency (`store_google_play`,
-`store_app_gallery`) skips vendoring entirely: a `nxModules`-gated
-`implementation(...)` line and a hand-written JNI shim replace
-`NxStore<Name>.cmake` - see `store_google_play`'s own paragraph above, and
-`engine/core/foundation/platform/android_jni.h` for the reusable JNI toolkit
-every mobile backend shares.
+`store_app_gallery`) skips CMake-side vendoring entirely: a hand-written
+JNI shim replaces `NxStore<Name>.cmake` on the C++ side, and its Gradle
+dependency lives in the module's own `android/build.gradle.kts` - see
+`store_google_play`'s own paragraph above, "Android Gradle wiring" below,
+and `engine/core/foundation/platform/android_jni.h` for the reusable JNI
+toolkit every mobile backend shares.
 
 `store_galaxy_store` needs a **third** vendoring shape, for the one SDK in
 this family that's both mobile (no native/NDK API, same JNI-shim
@@ -293,72 +297,118 @@ developer must supply, same as the desktop backends): the Samsung IAP
 `.aar` goes under `modules/store_galaxy_store/third_party/` - gitignored
 via that module's own `.gitignore`, following the same `/third_party/`
 pattern as `store_steam`'s/`store_gog`'s own `.gitignore` files, just
-holding a `.aar` instead of a native SDK tree - and
-`android/app/build.gradle.kts` picks it up as a local `fileTree(...)`
-dependency (`implementation(fileTree(...) { include("*.aar") })`) rather
-than a Maven coordinate, gated on `"store_galaxy_store" in nxModules` the
-same way the Maven-hosted mobile SDKs are. A missing `.aar` is a
+holding a `.aar` instead of a native SDK tree - and the module's own
+`android/build.gradle.kts` picks it up as a local `fileTree(...)`
+dependency rather than a Maven coordinate. A missing `.aar` is a
 `GradleException` naming where to place it, not a silent skip or a
 confusing Kotlin "unresolved reference" compile error - the same bar
 `NxStore<Name>.cmake`'s own `FATAL_ERROR` sets for a missing desktop SDK,
 and the same bar `store_app_gallery`'s missing-`agconnect-services.json`
-check sets above.
+check sets below.
 
-## AGConnect wiring
+## Android Gradle wiring
 
-`store_app_gallery` is the only backend so far whose Gradle plugin has no
+A module owns its own Android-side Gradle dependencies, exactly like it
+owns its own `CMakeLists.txt` - `android/app/build.gradle.kts` (the shared,
+engine-owned `:app` module every project points at) never names a specific
+backend. A module that needs extra Gradle dependencies, a vendor `.aar`,
+or to apply a plugin ships `modules/<name>/android/build.gradle.kts`;
+`android/app/build.gradle.kts` applies it generically for every enabled
+module that has one (`apply(from = ...)`, right after `nxModules` is
+known), publishing `nxProjectDir`/`nxEngineRoot` via `extra` first so a
+module's script can reach them (a plain Kotlin `val` in one `.gradle.kts`
+file isn't visible from another). This is *not* a separate Gradle
+subproject - the applied script runs in `:app`'s own `Project` context
+(same compilation unit, same manifest, same `namespace`), so
+`dependencies{}`/`apply(plugin = ...)` inside it behave exactly as if
+written directly in `:app`'s own build script. One real wrinkle: Gradle
+doesn't generate type-safe `implementation`/`api`/... accessors for a
+script applied this way, so a module's `dependencies{}` block adds
+configurations by string name (`"implementation"(...)`, not the typed
+`implementation(...)` function) - `store_google_play`'s
+`android/build.gradle.kts` is the simplest worked example (one
+`"implementation"(...)` line, nothing else).
+
+`store_app_gallery` is the one backend whose Gradle plugin has no
 plugin-marker artifact for the modern `plugins{}` DSL (confirmed by
 decompiling `agcp-1.9.6.300.jar`: Gradle cannot resolve
 `com.huawei.agconnect` as a plugin id from any repository, Huawei's own
-included) - it only ships the classic buildscript-classpath form, so it
-needs more threading through than a `nxModules`-gated `implementation(...)`
-line:
+included) - it only ships the classic buildscript-classpath form, which a
+module's own `android/build.gradle.kts` genuinely cannot register itself
+(Gradle requires `buildscript{}` to be the very first block in a script,
+before `nxModules` - and hence which modules are even enabled - is known).
+For this one case, a module drops
+`modules/<name>/android/settings.properties`
+(`repository=`/`buildscriptClasspath=`/`catalogPluginAlias=`/
+`catalogPluginId=` keys) instead, scanned generically by two engine files
+that must run before `nxModules` exists:
 
-- The top-level `build.gradle.kts` (template + every real project copy)
-  declares `classpath("com.huawei.agconnect:agcp:1.9.6.300")` in a
-  `buildscript {}` block, resolved from the Huawei Maven repo
-  (`https://developer.huawei.com/repo/`, also registered in
-  `settings.gradle.kts`'s `dependencyResolutionManagement.repositories` for
-  the plain `com.huawei.hms:iap` dependency itself).
-- `settings.gradle.kts` also declares an otherwise-empty `libs` version
-  catalog with one entry: `plugin("android-application",
-  "com.android.application").version(...)`. This isn't for our own use -
-  decompiling the plugin showed its `GradleVersionTool` determines the
-  Android Gradle Plugin version by first scanning buildscript classpath
-  dependencies for a classic `com.android.tools.build:gradle` entry (which
-  this project has none of, since AGP is applied through the `plugins{}`
-  DSL), then falling back to reading `libs.plugins.android.application`
-  from a catalog literally named `libs` - failing outright
-  (`Catalog named libs doesn't exist` / `No value present`) if neither
-  exists. This project has no real version catalog of its own; the entry
-  exists purely to satisfy that lookup, and its version must be kept in
-  sync with `id("com.android.application")`'s own version.
-- `android/app/build.gradle.kts` declares `id("com.huawei.agconnect") apply
-  false` beside `com.android.application`, then - only when
-  `store_app_gallery` is in `nxModules` - copies the project's own
-  `android/agconnect-services.json` into the shared `:app` module directory
-  (the plugin reads it synchronously at configuration time, so the copy
-  must happen before `apply(plugin = "com.huawei.agconnect")` runs, the same
-  ordering constraint as everything else in this file that touches
-  configuration-time state) and applies the plugin. A project with the
-  module enabled but no `android/agconnect-services.json` gets a clear
-  `GradleException` up front instead of a mysterious plugin failure.
-- `com.huawei.hms:iap`'s own manifest sets `android:allowBackup="false"`;
-  the shared `android/app/src/main/AndroidManifest.xml` carries
-  `tools:replace="android:allowBackup"` on its `<application>` tag
-  unconditionally (inert when no enabled module conflicts on that attribute)
-  so the manifest merger has a winner to pick instead of failing the build.
+- `settings.gradle.kts` scans every module DIRECTORY present on disk (not
+  the current project's enabled module list - unknown yet) for this file,
+  using `repository=` to populate `dependencyResolutionManagement.repositories`
+  (needed for the plain `com.huawei.hms:iap` dependency itself) and
+  `catalogPluginAlias=`/`catalogPluginId=` to backfill an otherwise-empty
+  `libs` version catalog. That catalog exists only because AGConnect's own
+  `GradleVersionTool` determines the Android Gradle Plugin version by first
+  scanning buildscript classpath dependencies for a classic
+  `com.android.tools.build:gradle` entry (this project has none, since AGP
+  is applied through the `plugins{}` DSL), then falling back to reading
+  `libs.plugins.android.application` from a catalog literally named `libs` -
+  failing outright (`Catalog named libs doesn't exist` / `No value present`)
+  if neither exists. This project keeps no real catalog of its own; the
+  entry exists purely to satisfy that lookup.
+- The same scan, using `repository=`/`buildscriptClasspath=`, runs again in
+  the **root project's** own `build.gradle.kts` (template + every real
+  project copy) - not `:app`'s - because a `buildscript{}` block placed in
+  `:app`'s own script (which was the first thing tried here) disables
+  Gradle's type-safe accessor generation for the rest of that file's
+  `android{}`/`androidComponents{}` DSL entirely (`namespace`, `compileSdk`,
+  `packaging`, `signingConfig`, `variant.sources`, ... all stop resolving).
+  Subprojects inherit the root project's buildscript classpath, so
+  `apply(plugin = "com.huawei.agconnect")` - called from
+  `store_app_gallery`'s own `android/build.gradle.kts`, itself applied into
+  `:app` - still resolves it correctly.
 
-Verified end-to-end with a synthetic placeholder
-`agconnect-services.json` (structurally valid, no real Huawei backend
-behind it) - `nx.py build -p android --project projects/samples --abi
-arm64-v8a` with only `store`/`store_app_gallery` enabled produces a real
-signed-and-packaged APK. A real project still needs its own genuine
-`agconnect-services.json` from AppGallery Connect (which itself needs a
-verified Huawei Developer account with Merchant Service enabled) for HMS
-IAP to do anything at runtime - that account-verification step is a real
-environment limitation this repository can't shortcut, the same kind of gap
-`store_microsoft`'s package-identity requirement already documents above.
+With that classpath in place, `store_app_gallery/android/build.gradle.kts`
+does the rest entirely on its own: copies the current project's
+`android/agconnect-services.json` into the shared `:app` module directory
+(the plugin reads it synchronously at configuration time, so the copy must
+happen first) - throwing a clear `GradleException` naming where to put it
+if the project has none - then calls `apply(plugin = "com.huawei.agconnect")`
+and declares the `com.huawei.hms:iap` dependency. `com.huawei.hms:iap`'s
+own manifest also sets `android:allowBackup="false"`; the shared
+`android/app/src/main/AndroidManifest.xml` carries
+`tools:replace="android:allowBackup"` on its `<application>` tag
+unconditionally (inert when no enabled module conflicts on that attribute)
+so the manifest merger has a winner to pick instead of failing the build -
+along with Samsung's `com.samsung.android.iap.permission.BILLING`
+permission (not auto-merged from its `.aar` the way Play Billing's/HMS
+IAP's own manifests are, per Samsung's integration guide). These two are
+the one remaining exception to "a module owns its Android files": a
+manifest merge conflict, and `tools:replace` specifically, can only be
+resolved from the actual application module's manifest, and neither is a
+plugin registered late enough to reach through a module's own
+`android/build.gradle.kts` the way a dependency can - going further (real
+per-module Gradle subprojects, each with its own manifest that merges in
+automatically the way a normal AAR dependency's does) would remove even
+this, at the cost of a much bigger structural change to how a project's
+Android build is put together.
+
+Verified end-to-end with a synthetic placeholder `agconnect-services.json`
+(structurally valid, no real Huawei backend behind it) - `nx.py build -p
+android --project projects/samples --abi arm64-v8a` with `store`/
+`store_google_play`/`store_app_gallery` enabled together produces a real
+signed-and-packaged APK, and disabling `store_app_gallery` again (with
+`store_galaxy_store` enabled and no vendored `.aar` present) still fails
+with exactly `store_galaxy_store`'s own clear `GradleException`, not a
+generic script error - confirming the whole generic per-module chain
+degrades the same way a missing desktop SDK's `FATAL_ERROR` already does.
+A real project still needs its own genuine `agconnect-services.json` from
+AppGallery Connect (which itself needs a verified Huawei Developer account
+with Merchant Service enabled) for HMS IAP to do anything at runtime - that
+account-verification step is a real environment limitation this repository
+can't shortcut, the same kind of gap `store_microsoft`'s package-identity
+requirement already documents above.
 
 ## Adding a new backend
 
