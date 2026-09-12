@@ -330,6 +330,17 @@ translates the SDK's four-way `PCBangPremium` code into the two booleans a
 game actually needs (`is_pc_bang()`, `is_premium()`) rather than exposing
 the raw enum value to Luau.
 
+`store_microsoft`'s own extra is smaller still: a rate-and-review prompt
+(`store_microsoft_rate_review.h`, `StoreContext::
+RequestRateAndReviewAppAsync`, verified against the real Windows SDK's
+C++/WinRT projection headers rather than guessed) that shows the native
+Store rating dialog and reports back whether the user actually changed
+their rating. `MicrosoftRateReview` follows the exact same mutex-guarded-
+cache shape `MicrosoftCore`/`MicrosoftIap` already use, and translates the
+SDK's four-way `StoreRateAndReviewStatus` into `succeeded()`/
+`canceled_by_user()` the same way `StovePCBang`/`EgsMods` already avoid
+leaking a raw enum to Luau.
+
 `order_modules()` already rejects two modules that both declare the same
 `provided_services` entry, so if a build somehow enabled two store backends
 at once, startup fails loudly (`"exported by both"`) instead of silently
