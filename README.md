@@ -8,10 +8,10 @@ A storefront integration is a separate backend module - `modules/store_steam`,
 `modules/store_egs`, `modules/store_gog`, `modules/store_stove`,
 `modules/store_microsoft`, `modules/store_google_play` and
 `modules/store_app_gallery` are built and verified so far;
-`modules/store_galaxy_store` is built too but **unverified** (no compile
-check - see its own paragraph below). The mobile stores still to come -
-Amazon Appstore, Apple's App Store - follow `store_google_play`'s recipe
-rather than the desktop backends'; see "Adding a new backend" below.
+`modules/store_galaxy_store` and `modules/store_app_store` are built too but
+**unverified** (no compile check - see their own paragraphs below). Amazon
+Appstore was deliberately dropped rather than left "still to come" - every
+other mobile store this repository targets is now covered.
 
 The five show the same neutral interface accommodating structurally
 different SDKs: Steam's calls are mostly synchronous (a local client cache),
@@ -82,9 +82,9 @@ rather than only asserting the guard path never gets exercised.
 native/NDK API of its own at all** - Google Play Billing is pure Java
 (Kotlin, in this repo's case), confirmed absent from Google's own
 documentation and every forum thread on the question. That makes it the
-worked example for every other mobile store (Huawei App Gallery, Samsung
-Galaxy Store, and Amazon Appstore still to come - none of them ship a
-native SDK either): a hand-written shim
+worked example for every other Android mobile store (Huawei App Gallery,
+Samsung Galaxy Store - neither ships a native SDK either): a hand-written
+shim
 (`modules/store_google_play/android/java/com/nx2d/runtime/
 NxGooglePlayBilling.kt`) wraps the vendor's Java/Kotlin API as a set of
 `@JvmStatic` functions the C++ side calls via JNI, and reports results back
@@ -153,10 +153,8 @@ without one. Every method signature and VO field name here was read from
 Samsung's own official IAP programming guide and codelab, not guessed, but
 none of it has been run through a real compiler - the same honest
 "write it now, unverified" gap the user explicitly signed off on for this
-backend, the same shape Apple's StoreKit backend will eventually have for
-an entirely different reason (no Mac/Xcode in this environment at all).
-Structurally it's the simplest of the three: `startPayment()` takes no
-Activity/request-code pair at all, resolving purely through
+backend. Structurally it's the simplest of the three: `startPayment()`
+takes no Activity/request-code pair at all, resolving purely through
 `OnPaymentListener` - `IapHelper` manages launching and binding to the
 Galaxy Store checkout UI internally, so unlike `store_app_gallery` this
 backend needs no `NxActivity.ActivityResultHandler` registration, the same
@@ -167,6 +165,45 @@ acknowledging every purchase via `acknowledgePurchases()` - both right
 after a fresh purchase and for every `AcknowledgedStatus.NOT_ACKNOWLEDGED`
 entry a `getOwnedList()` re-query turns up, mirroring
 `NxGooglePlayBilling.kt`'s own `acknowledgeIfNeeded()`.
+
+`store_app_store` is the fourth mobile backend and structurally the odd one
+out: it targets iOS, not Android, so there is no JNI shim at all -
+Objective-C++ (`.mm`) lets its two files call StoreKit directly and be
+called back by it directly, the first mobile backend in this family with
+no cross-language shim layer of any kind. It uses classic StoreKit
+(`SKPaymentQueue`/`SKProduct`/`SKPaymentTransactionObserver`), not the
+newer Swift-only StoreKit 2 - the async/await product and transaction APIs
+StoreKit 2 adds have no Objective-C bridge at all, and this engine is
+C++/Objective-C++, not Swift, the same reason every other major C++ game
+engine's iOS IAP integration still goes through classic StoreKit today.
+`AppStoreCore`/`AppStoreIap` mirror the other three mobile backends'
+eventually-consistent cache shape exactly, just populated from
+`SKProductsRequestDelegate`/`SKPaymentTransactionObserver` callbacks
+instead of JNI-exported functions, and the same static-current-instance
+dispatch convention is kept purely for consistency across the family, not
+because Objective-C++ actually needs it (a delegate object could just as
+easily hold a raw C++ pointer to the instance it belongs to). It never
+registers `store.achievements`/`store.cloud_saves`/`store.presence` for the
+same "the SDK simply doesn't have it" reason (Game Center is a separate,
+unrelated product); can't check base-app ownership (the App Store already
+gates install); and has no restore-purchases API distinct from the
+transaction observer itself - `refresh_ownership()` calls
+`SKPaymentQueue.restoreCompletedTransactions`, and every restored
+transaction arrives through the *same* `updatedTransactions:` callback a
+fresh purchase does, distinguished only by `transactionState`. Every
+non-consumable purchase is finished (`finishTransaction:`) immediately,
+whether fresh or restored - StoreKit, like the other three mobile
+backends' own equivalent step, never redelivers a finished transaction
+again. This backend is unverified for a different reason than
+`store_galaxy_store`: not a missing vendor file, but no Mac/Xcode
+anywhere in this environment - it has never been compiled, only written
+against Apple's own StoreKit reference documentation and this repository's
+existing `.mm` precedent (`engine/core/runtime/sdl/sdl_haptics_ios.mm`,
+`engine/core/foundation/vfs/native_async_io_dispatch.mm`) for how
+Objective-C++ is already written elsewhere in this codebase. Amazon
+Appstore, the remaining mobile storefront, was deliberately not built -
+StoreKit's own `.mm`-only pattern above is the template if it's ever
+picked back up.
 
 This module never names a concrete store, the same discipline the scripting
 backends already keep for language neutrality - `grep`ping this module for a
@@ -237,27 +274,30 @@ passed through the cook pipeline byte-for-byte), read automatically in
 `on_attach`. One file per backend, not one shared file, so a project that
 only ships to Steam never has to know EOS's config schema, and can
 `.gitignore` just the backends whose credentials are genuinely sensitive.
-`store_microsoft`, `store_google_play`, `store_app_gallery` and
-`store_galaxy_store` are the exceptions - none has a config file, because
-none has developer-supplied credentials to configure at *runtime* in the
-first place: `StoreContext::GetDefault()`, `BillingClient.newBuilder(context)`,
-`Iap.getIapClient(activity)` and `IapHelper.getInstance(context)` all take
+`store_microsoft`, `store_google_play`, `store_app_gallery`,
+`store_galaxy_store` and `store_app_store` are the exceptions - none has a
+config file, because none has developer-supplied credentials to configure
+at *runtime* in the first place: `StoreContext::GetDefault()`,
+`BillingClient.newBuilder(context)`, `Iap.getIapClient(activity)`,
+`IapHelper.getInstance(context)` and `SKPaymentQueue.defaultQueue` all take
 no per-developer id/secret, resolving everything from the process's own
-package identity (and, for `store_google_play`/`store_app_gallery`/
-`store_galaxy_store`, the installed Play Store/AppGallery/Galaxy Store
-client) instead. `store_app_gallery`'s one credential,
-`agconnect-services.json`, is a **build-time** artifact instead - see
-"Android Gradle wiring" below; `store_galaxy_store`'s equivalent is the vendored
-`.aar` itself - see "SDK delivery convention" below.
+package/bundle identity (and, for `store_google_play`/`store_app_gallery`/
+`store_galaxy_store`/`store_app_store`, the installed Play Store/
+AppGallery/Galaxy Store client or signed-in Apple ID) instead.
+`store_app_gallery`'s one credential, `agconnect-services.json`, is a
+**build-time** artifact instead - see "Android Gradle wiring" below;
+`store_galaxy_store`'s equivalent is the vendored `.aar` itself - see "SDK
+delivery convention" below.
 
 ## SDK delivery convention
 
 A storefront SDK is developer-provided and **never committed** - vendors
 either gate the download behind a partner account (Steamworks, EOS, GOG
 Galaxy, Stove, and now Samsung IAP too) or there's nothing to vendor at all
-(Microsoft Store's `Windows.Services.Store` ships with the Windows SDK
-already on the machine; Google Play Billing and HMS IAP are plain public
-Maven dependencies, no partner account or download either). Each desktop
+(Microsoft Store's `Windows.Services.Store` and Apple's StoreKit both ship
+with their respective platform SDKs already; Google Play Billing and HMS
+IAP are plain public Maven dependencies, no partner account or download
+either). Each desktop
 backend that needs a vendored SDK follows `modules/live2d`'s precedent for
 a big vendor SDK with its own idiosyncratic shape:
 
