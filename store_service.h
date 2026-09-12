@@ -33,6 +33,16 @@ public:
   [[nodiscard]] virtual nx::vector<nx::string> owned_dlc_ids() const = 0;
 
   [[nodiscard]] virtual nx::string_view store_name() const noexcept = 0;
+
+  /// Triggers an async re-query of ownership state where the backend needs
+  /// one - is_owned()/owned_dlc_ids() otherwise just read whatever was
+  /// cached by the last call (empty/false forever if this is never called).
+  /// Most backends refresh everything in one bulk call regardless of
+  /// @p dlc_id (Play Billing/HMS/Samsung IAP/StoreKit/Stove/EOS); GOG Galaxy
+  /// has no bulk query and only checks the one DLC named by @p dlc_id (an
+  /// empty id is a no-op there). A synchronous backend (Steam) needs no
+  /// override at all - its getters already read live SDK state every call.
+  virtual void refresh_ownership(nx::string_view dlc_id = {}) {}
 };
 
 struct StoreProduct {
@@ -55,6 +65,14 @@ public:
   /// Empty when the most recently finished purchase succeeded (or none has
   /// run yet).
   [[nodiscard]] virtual nx::string_view purchase_error() const = 0;
+
+  /// Triggers an async re-query of the product catalogue - products()
+  /// otherwise just reads whatever was cached by the last call (empty
+  /// forever if this is never called). Backends with no "list everything"
+  /// query (Play Billing, HMS IAP, Samsung IAP, StoreKit) need @p
+  /// product_ids up front; backends with a real catalogue query (Steam,
+  /// EOS, Stove, Microsoft Store) already fetch everything and ignore it.
+  virtual void refresh_products(const nx::vector<nx::string> &product_ids = {}) {}
 };
 
 class StoreAchievements {
@@ -71,6 +89,14 @@ public:
   /// to know which - an implementation tries both).
   virtual bool set_stat(nx::string_view id, f64 value) = 0;
   [[nodiscard]] virtual f64 stat(nx::string_view id) const = 0;
+
+  /// Triggers an async re-query of achievement definitions, unlock state,
+  /// and numeric stats - the getters above otherwise just read whatever was
+  /// cached by the last call (empty/false/0 forever if this is never
+  /// called). Most backends refresh everything in one shot regardless of
+  /// @p stat_ids; Stove has no bulk stat query and only refreshes the stats
+  /// named there (achievement ids/unlock state still refresh in bulk).
+  virtual void refresh(const nx::vector<nx::string> &stat_ids = {}) {}
 };
 
 /// Small key/value cloud saves - not a file API. A backend maps this onto
@@ -87,6 +113,12 @@ public:
   [[nodiscard]] virtual nx::vector<nx::string> keys() const = 0;
   [[nodiscard]] virtual u64 bytes_used() const = 0;
   [[nodiscard]] virtual u64 bytes_total() const = 0;
+
+  /// Triggers an async re-query of the file list - keys() otherwise just
+  /// reads whatever was cached by the last call (empty forever if this is
+  /// never called). A backend with synchronous local reads (Steam, GOG)
+  /// needs no override at all.
+  virtual void refresh_keys() {}
 };
 
 /// Rich presence + friends.
@@ -98,6 +130,12 @@ public:
   [[nodiscard]] virtual nx::string_view own_name() const = 0;
   [[nodiscard]] virtual usize friend_count() const = 0;
   [[nodiscard]] virtual nx::vector<nx::string> friend_names() const = 0;
+
+  /// Triggers an async re-query of own_name()/friend_count()/friend_names()
+  /// - they otherwise just read whatever was cached by the last call
+  /// (empty forever if this is never called). A backend with synchronous
+  /// local reads (Steam) needs no override at all.
+  virtual void refresh() {}
 };
 
 }

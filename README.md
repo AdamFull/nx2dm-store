@@ -241,6 +241,45 @@ so it never registers `StoreIap` either. `store_microsoft` registers only
 no achievements/stats/cloud-save/friends API of its own at all (Xbox's
 equivalents live in the separate, much larger Xbox Live/GDK SDK).
 
+### Refresh: triggering the query behind a cache
+
+Every getter above except on `store_steam` (whose SDK reads are already
+synchronous local-client calls) is backed by a small cache that a backend's
+own async SDK query populates - `EgsCore::owned_dlc_ids()`, say, only ever
+returns what the last `EOS_Ecom_QueryEntitlements` round trip found. Each of
+the five interfaces therefore also declares a `refresh_*` method - a
+non-pure virtual with a default no-op body, so a fully synchronous backend
+(or a future one) needs no override at all:
+
+- `StoreCore::refresh_ownership(dlc_id = {})` - most backends bulk-refresh
+  everything regardless of `dlc_id` (Play Billing/HMS/Samsung IAP/StoreKit/
+  Stove/EOS); GOG Galaxy has no bulk query and only checks the one DLC named
+  (an empty id is a no-op there).
+- `StoreIap::refresh_products(product_ids = {})` - backends with no "list
+  everything" query (Play Billing, HMS IAP, Samsung IAP, StoreKit) need
+  `product_ids` up front; a backend with a real catalogue query ignores it.
+- `StoreAchievements::refresh(stat_ids = {})` - most backends refresh
+  definitions/unlock-state/stats together in one shot; Stove has no bulk
+  stat query and only refreshes the stats named in `stat_ids` (achievement
+  ids/unlock state still refresh in bulk there regardless).
+- `StoreCloudSaves::refresh_keys()` / `StorePresence::refresh()` - no ids
+  needed, every backend that overrides these bulk-refreshes.
+
+`store/store_scripting.cpp`'s five `store_refresh_*` Luau bindings
+(`store_refresh_owned_dlc`, `store_refresh_products`,
+`store_refresh_achievement_ids`, `store_refresh_cloud_save_keys`,
+`store_refresh_friend_names`) each call the matching `refresh_*` method
+before taking their snapshot - a script that never calls one of these gets
+`false`/empty forever from the getters on every backend except Steam, the
+same way any consumer of an async SDK would if it never triggered the query
+in the first place. `store_refresh_dlc_ownership(dlc_id)`,
+`store_set_product_id(id)`/`store_clear_product_ids()`, and
+`store_refresh_stat(id)` are the three small additions a script needs to
+reach the id-scoped paths above (GOG's single-DLC check, the four
+mobile-shaped backends' product lookup, and Stove's single-stat refresh) -
+harmless bulk refreshes when called against a backend that doesn't need
+them.
+
 A backend can also expose capabilities that don't belong in this neutral
 interface at all - Steam's Workshop, leaderboards, and explicit overlay
 control (`modules/store_steam/store_steam_workshop.h`,

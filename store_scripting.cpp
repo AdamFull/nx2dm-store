@@ -54,9 +54,24 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
     StoreCore *const core = ctx.services().find<StoreCore>(kCoreService);
     if (core == nullptr)
       return false;
+    core->refresh_ownership();
     owned_dlc->items = core->owned_dlc_ids();
     return true;
   });
+
+  /// Refreshes ownership of exactly one DLC id - the only path that reaches
+  /// a real result on GOG, whose SDK has no bulk ownership query (see
+  /// store::StoreCore::refresh_ownership()). A harmless bulk refresh on
+  /// every other backend, which ignores the id.
+  host.expose_as("store_refresh_dlc_ownership",
+                 [&ctx](const nx::string_view dlc_id) {
+                   StoreCore *const core =
+                       ctx.services().find<StoreCore>(kCoreService);
+                   if (core == nullptr)
+                     return false;
+                   core->refresh_ownership(dlc_id);
+                   return true;
+                 });
 
   host.expose_as("store_owned_dlc_count", [owned_dlc]() {
     return static_cast<f64>(owned_dlc->items.size());
@@ -93,7 +108,21 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
         ctx.services().find<StoreAchievements>(kAchievementsService);
     if (achievements == nullptr)
       return false;
+    achievements->refresh();
     achievement_ids->items = achievements->achievement_ids();
+    return true;
+  });
+
+  /// Refreshes exactly one numeric stat - the only path that reaches a real
+  /// result on Stove, whose SDK has no bulk stat query (see
+  /// store::StoreAchievements::refresh()). A harmless bulk refresh on every
+  /// other backend, which ignores the id.
+  host.expose_as("store_refresh_stat", [&ctx](const nx::string_view id) {
+    StoreAchievements *const achievements =
+        ctx.services().find<StoreAchievements>(kAchievementsService);
+    if (achievements == nullptr)
+      return false;
+    achievements->refresh({nx::string(id)});
     return true;
   });
 
@@ -127,11 +156,27 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
   // -- IAP ------------------------------------------------------------
 
   const auto products = std::make_shared<ProductCache>();
+  const auto pending_product_ids = std::make_shared<nx::vector<nx::string>>();
 
-  host.expose_as("store_refresh_products", [&ctx, products]() {
+  /// Backends with no "list everything" catalogue query (Play Billing, HMS
+  /// IAP, Samsung IAP, StoreKit) need their product ids named up front - a
+  /// game builds that list here before calling store_refresh_products().
+  /// Ignored by every backend with a real catalogue query.
+  host.expose_as("store_set_product_id",
+                 [pending_product_ids](const nx::string_view id) {
+                   pending_product_ids->emplace_back(id);
+                   return true;
+                 });
+  host.expose_as("store_clear_product_ids", [pending_product_ids]() {
+    pending_product_ids->clear();
+    return true;
+  });
+
+  host.expose_as("store_refresh_products", [&ctx, products, pending_product_ids]() {
     StoreIap *const iap = ctx.services().find<StoreIap>(kIapService);
     if (iap == nullptr)
       return false;
+    iap->refresh_products(*pending_product_ids);
     products->products = iap->products();
     return true;
   });
@@ -219,6 +264,7 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
         ctx.services().find<StoreCloudSaves>(kCloudSavesService);
     if (saves == nullptr)
       return false;
+    saves->refresh_keys();
     cloud_save_keys->items = saves->keys();
     return true;
   });
@@ -274,6 +320,7 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
         ctx.services().find<StorePresence>(kPresenceService);
     if (presence == nullptr)
       return false;
+    presence->refresh();
     friend_names->items = presence->friend_names();
     return true;
   });
