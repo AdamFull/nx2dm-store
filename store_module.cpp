@@ -1,6 +1,6 @@
 #include "store/store_scripting.h"
 
-#include "core/app/module_system/module.h"
+#include "app/module_system/module.h"
 
 namespace nxm::store {
 namespace {

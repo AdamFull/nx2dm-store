@@ -2,8 +2,8 @@
 
 #include "store/store_service.h"
 
-#include "core/app/module_system/module_context.h"
-#include "core/script/script_host.h"
+#include "app/module_system/module_context.h"
+#include "script/script_host.h"
 
 #include <memory>
 
