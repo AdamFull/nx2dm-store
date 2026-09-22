@@ -16,3 +16,6 @@ target_link_libraries(nx_store_tests
 
 set_target_properties(nx_store_tests PROPERTIES FOLDER "tests")
 nxtest_discover_tests(nx_store_tests LABELS store)
+
+target_compile_definitions(nx_store_tests PRIVATE
+        NX_MODULE_SERVICES_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/../script-services.json")
