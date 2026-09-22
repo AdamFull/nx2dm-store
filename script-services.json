@@ -17,6 +17,10 @@
       "signature": "(string)->(boolean)"
     },
     {
+      "name": "store_owned_dlcs",
+      "signature": "()->({string})"
+    },
+    {
       "name": "store_owned_dlc_count",
       "signature": "()->(number)"
     },
@@ -39,6 +43,10 @@
     {
       "name": "store_refresh_stat",
       "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_achievements",
+      "signature": "()->({string})"
     },
     {
       "name": "store_achievement_count",
@@ -67,6 +75,10 @@
     {
       "name": "store_refresh_products",
       "signature": "()->(boolean)"
+    },
+    {
+      "name": "store_products",
+      "signature": "()->({{id: string, title: string, price: string}})"
     },
     {
       "name": "store_product_count",
@@ -117,6 +129,10 @@
       "signature": "()->(boolean)"
     },
     {
+      "name": "store_cloud_save_keys",
+      "signature": "()->({string})"
+    },
+    {
       "name": "store_cloud_save_key_count",
       "signature": "()->(number)"
     },
@@ -135,6 +151,10 @@
     {
       "name": "store_set_presence",
       "signature": "(string)->(boolean)"
+    },
+    {
+      "name": "store_friends",
+      "signature": "()->({string})"
     },
     {
       "name": "store_friend_count",

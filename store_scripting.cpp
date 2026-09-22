@@ -11,11 +11,17 @@ namespace nxm::store {
 namespace {
 
 /// Products fetched by the most recent `store_refresh_products()`, read back
-/// through index-based getters - Luau bindings only pass scalars, the same
-/// reason modio's own scripting layer keeps a shared result slot (see
-/// modio_scripting.cpp's AsyncOp) instead of returning a struct.
+/// whole by `store_products()` or one field at a time by the index getters,
+/// which predate services that return tables.
 struct ProductCache {
   nx::vector<StoreProduct> products;
+};
+
+/// One product as a script reads it, borrowed from the cache.
+struct ProductRecord {
+  nx::string_view id;
+  nx::string_view title;
+  nx::string_view price;
 };
 
 /// Only nx::string_view has a script value_traits specialization
@@ -27,12 +33,20 @@ struct CloudSaveCache {
   nx::string last_read;
 };
 
-/// The same index-into-a-cached-list shape as ProductCache, reused for every
-/// other list-returning neutral method (owned DLC ids, achievement ids,
-/// cloud save keys, friend names) - each gets its own instance below, only
-/// ever populated by its own refresh function.
+/// The same cached-list shape as ProductCache, reused for every other
+/// list-returning neutral method (owned DLC ids, achievement ids, cloud save
+/// keys, friend names) - each gets its own instance below, only ever
+/// populated by its own refresh function.
 struct StringListCache {
   nx::vector<nx::string> items;
+
+  [[nodiscard]] nx::vector<nx::string_view> views() const {
+    nx::vector<nx::string_view> out;
+    out.reserve(items.size());
+    for (const nx::string &item : items)
+      out.push_back(item.view());
+    return out;
+  }
 };
 
 }
@@ -72,6 +86,8 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
                    core->refresh_ownership(dlc_id);
                    return true;
                  });
+
+  host.expose_as("store_owned_dlcs", [owned_dlc] { return owned_dlc->views(); });
 
   host.expose_as("store_owned_dlc_count", [owned_dlc]() {
     return static_cast<f64>(owned_dlc->items.size());
@@ -126,6 +142,9 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
     return true;
   });
 
+  host.expose_as("store_achievements",
+                 [achievement_ids] { return achievement_ids->views(); });
+
   host.expose_as("store_achievement_count", [achievement_ids]() {
     return static_cast<f64>(achievement_ids->items.size());
   });
@@ -179,6 +198,15 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
     iap->refresh_products(*pending_product_ids);
     products->products = iap->products();
     return true;
+  });
+
+  host.expose_as("store_products", [products] {
+    nx::vector<ProductRecord> out;
+    out.reserve(products->products.size());
+    for (const StoreProduct &product : products->products)
+      out.push_back({product.id.view(), product.title.view(),
+                     product.price_display.view()});
+    return out;
   });
 
   host.expose_as("store_product_count", [products]() {
@@ -269,6 +297,9 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
     return true;
   });
 
+  host.expose_as("store_cloud_save_keys",
+                 [cloud_save_keys] { return cloud_save_keys->views(); });
+
   host.expose_as("store_cloud_save_key_count", [cloud_save_keys]() {
     return static_cast<f64>(cloud_save_keys->items.size());
   });
@@ -324,6 +355,8 @@ void expose_store_services(nxe::script::Host &host, nxe::ModuleContext &ctx) {
     friend_names->items = presence->friend_names();
     return true;
   });
+
+  host.expose_as("store_friends", [friend_names] { return friend_names->views(); });
 
   host.expose_as("store_friend_name",
                  [friend_names](const f64 index) -> nx::string_view {
