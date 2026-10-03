@@ -1,7 +1,7 @@
 # store module
 
 The neutral storefront interface. `modules/store` itself talks to no
-storefront - it only declares five independently-optional services
+storefront - it only declares six independently-optional services
 (`store_service.h`) and exposes the neutral `host.store_*` Luau surface
 (`store_scripting.cpp`) that forwards to whichever backend module is active.
 A storefront integration is a separate backend module - `modules/store_steam`,
@@ -293,7 +293,7 @@ This module never names a concrete store, the same discipline the scripting
 backends already keep for language neutrality - `grep`ping this module for a
 store name should never turn up a hit.
 
-## The five services
+## The six services
 
 Declared in `store_service.h`, registered by a backend through
 `ModuleContext::service_registrar().provide(id, version, service)` and read
@@ -308,6 +308,7 @@ own services.
 | `store.achievements` | `StoreAchievements` - achievements + numeric stats | optional |
 | `store.cloud_saves` | `StoreCloudSaves` - key/value saves, listing, quota | optional |
 | `store.presence` | `StorePresence` - rich presence + a real friends list | optional |
+| `store.identity` | `StoreIdentity` - a ticket proving who the user is, for another service to check with the store | optional; `store_steam` only so far |
 
 "Optional" means exactly what `ServiceProvider::find<T>` already does for any
 absent service: it returns `nullptr`. A backend whose SDK has no cloud-save
@@ -324,6 +325,17 @@ so it never registers `StoreIap` either. `store_microsoft` registers only
 `store.core`/`store.iap` for the same reason: `Windows.Services.Store` has
 no achievements/stats/cloud-save/friends API of its own at all (Xbox's
 equivalents live in the separate, much larger Xbox Live/GDK SDK).
+
+`store.identity` serves a third party that signs a user in through their
+store account, as mod.io does with Steam: `request_ticket()` begins one,
+`ticket_pending()` says it is still coming, and `ticket()` (base64) or
+`ticket_error()` says how it went - the same shared-slot shape as
+`StoreIap`'s purchase. `ticket_kind()` names the ticket as the services
+that take it do ("steam" for Steam's encrypted app ticket). `store_steam`
+asks Steam for an encrypted app ticket, which Steam hands out at most once
+a minute; the service checking it needs the game's Steam encrypted-ticket
+key on its side (for mod.io, entered on the game's mod.io dashboard). It is
+C++ only: there is no neutral Luau binding for it yet.
 
 ### Refresh: triggering the query behind a cache
 

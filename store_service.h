@@ -5,19 +5,21 @@
 
 namespace nxm::store {
 
-// Five independently-optional services - a backend module (store_steam,
+// Six independently-optional services - a backend module (store_steam,
 // store_eos, ...) registers only the ones its SDK actually has. A store
 // without cloud saves or presence (Stove's SDK ships neither) simply never
 // registers StoreCloudSaves/StorePresence, and
 // nxe::ServiceProvider::find<T>() already returns null for an absent
 // service - the same shape nxe::ModuleServiceDependency::optional already
-// uses elsewhere, not a new capability-flag system. See modules/store/README.md.
+// uses elsewhere, not a new capability-flag system. See
+// modules/store/README.md.
 
 inline constexpr nx::string_view kCoreService = "store.core";
 inline constexpr nx::string_view kIapService = "store.iap";
 inline constexpr nx::string_view kAchievementsService = "store.achievements";
 inline constexpr nx::string_view kCloudSavesService = "store.cloud_saves";
 inline constexpr nx::string_view kPresenceService = "store.presence";
+inline constexpr nx::string_view kIdentityService = "store.identity";
 
 /// Entitlement/ownership checks. The one service every backend provides.
 class StoreCore {
@@ -138,4 +140,24 @@ public:
   virtual void refresh() {}
 };
 
+/// A proof of who the signed-in user is, for another service (a mod
+/// platform, a game server) to check with the store itself. Asking is
+/// async, the same shared-slot idiom as StoreIap: `request_ticket()` begins
+/// one; poll `ticket_pending()`, then read `ticket()` or `ticket_error()`.
+class StoreIdentity {
+public:
+  virtual ~StoreIdentity() = default;
+
+  /// What kind of ticket this store gives, as the services that take them
+  /// name it: "steam" for Steam's encrypted app ticket.
+  [[nodiscard]] virtual nx::string_view ticket_kind() const noexcept = 0;
+  /// False, beginning nothing, when one is already pending or there is no
+  /// signed-in user to vouch for.
+  virtual bool request_ticket() = 0;
+  [[nodiscard]] virtual bool ticket_pending() const = 0;
+  /// The last ticket, base64; empty until one comes, and after a failure.
+  [[nodiscard]] virtual nx::string_view ticket() const = 0;
+  /// Why the last request failed; empty when it did not.
+  [[nodiscard]] virtual nx::string_view ticket_error() const = 0;
+};
 }
