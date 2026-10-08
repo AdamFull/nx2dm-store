@@ -454,9 +454,10 @@ other backend compiled in, with no manual flag to remember.
 ## Config convention
 
 Each backend owns its own INI file, matching `modules/modio`'s config
-convention exactly: `nx::ini::parse` + `nx::vfs::read_text` against
-`/config/store_<name>.ini` (authored at `assets/config/store_<name>.ini`,
-passed through the cook pipeline byte-for-byte), read automatically in
+convention exactly: `nx::ini::load` of `/config/store_<name>.ini` (authored
+at `assets/config/store_<name>.ini`; the cooker publishes it as
+`store_<name>.ini.nxb`, which is all a Shipping build reads), read
+automatically in
 `on_attach`. One file per backend, not one shared file, so a project that
 only ships to Steam never has to know EOS's config schema, and can
 `.gitignore` just the backends whose credentials are genuinely sensitive.
